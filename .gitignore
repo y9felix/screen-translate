@@ -1,0 +1,5 @@
+*.o
+screen-translate-overlay
+wlr-layer-shell-unstable-v1-client-protocol.h
+wlr-layer-shell-unstable-v1-protocol.c
+.progress.md
