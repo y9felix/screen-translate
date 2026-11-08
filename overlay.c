@@ -14,6 +14,7 @@
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include "virtual-keyboard-unstable-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
 struct buffer {
@@ -71,6 +72,8 @@ static struct wl_registry *registry;
 static struct wl_compositor *compositor;
 static struct wl_shm *shm;
 static struct zwlr_layer_shell_v1 *layer_shell;
+static struct zwp_virtual_keyboard_manager_v1 *vk_mgr;
+static struct zwp_virtual_keyboard_v1 *vk;
 static struct wl_seat *seat;
 static struct wl_surface *surface;
 static struct zwlr_layer_surface_v1 *layer_surface;
@@ -313,6 +316,9 @@ keyboard_keymap(void *data, struct wl_keyboard *kb, uint32_t format,
 		return;
 	}
 
+	if (vk)
+		zwp_virtual_keyboard_v1_keymap(vk, format, fd, size);
+
 	map_str = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
 	if (map_str == MAP_FAILED) {
 		close(fd);
@@ -363,17 +369,23 @@ keyboard_key(void *data, struct wl_keyboard *kb, uint32_t serial,
 	(void)data;
 	(void)kb;
 	(void)serial;
-	(void)time;
 
 	if (state != WL_KEYBOARD_KEY_STATE_PRESSED || !xkb_st)
 		return;
 
 	sym = xkb_state_key_get_one_sym(xkb_st, key + 8);
-	if (sym == XKB_KEY_Escape || sym == XKB_KEY_q || sym == XKB_KEY_Q) {
-		running = 0;
-	} else if (sym == XKB_KEY_space || sym == XKB_KEY_Tab) {
+	if (sym == XKB_KEY_space || sym == XKB_KEY_Tab) {
 		show_trans = !show_trans;
 		render();
+	} else {
+		if (sym != XKB_KEY_Escape && sym != XKB_KEY_q && sym != XKB_KEY_Q) {
+			if (vk) {
+				zwp_virtual_keyboard_v1_key(vk, time, key, WL_KEYBOARD_KEY_STATE_PRESSED);
+				zwp_virtual_keyboard_v1_key(vk, time, key, WL_KEYBOARD_KEY_STATE_RELEASED);
+				wl_display_flush(display);
+			}
+		}
+		running = 0;
 	}
 }
 
@@ -387,6 +399,9 @@ keyboard_modifiers(void *data, struct wl_keyboard *kb, uint32_t serial,
 	if (xkb_st)
 		xkb_state_update_mask(xkb_st, mods_depressed, mods_latched,
 		    mods_locked, 0, 0, group);
+	if (vk)
+		zwp_virtual_keyboard_v1_modifiers(vk, mods_depressed, mods_latched,
+		    mods_locked, group);
 }
 
 static void
@@ -530,6 +545,8 @@ registry_global(void *data, struct wl_registry *reg, uint32_t name,
 		shm = wl_registry_bind(reg, name, &wl_shm_interface, 1);
 	} else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
 		layer_shell = wl_registry_bind(reg, name, &zwlr_layer_shell_v1_interface, 1);
+	} else if (strcmp(interface, zwp_virtual_keyboard_manager_v1_interface.name) == 0) {
+		vk_mgr = wl_registry_bind(reg, name, &zwp_virtual_keyboard_manager_v1_interface, 1);
 	} else if (strcmp(interface, wl_seat_interface.name) == 0) {
 		seat = wl_registry_bind(reg, name, &wl_seat_interface, 5);
 		wl_seat_add_listener(seat, &seat_listener, NULL);
@@ -581,6 +598,9 @@ main(int argc, char *argv[])
 
 	if (!compositor || !shm || !layer_shell)
 		die("missing required wayland globals");
+
+	if (vk_mgr && seat)
+		vk = zwp_virtual_keyboard_manager_v1_create_virtual_keyboard(vk_mgr, seat);
 
 	surface = wl_compositor_create_surface(compositor);
 	if (!surface)
@@ -649,6 +669,10 @@ main(int argc, char *argv[])
 		cairo_surface_destroy(orig_surf);
 	if (trans_surf)
 		cairo_surface_destroy(trans_surf);
+	if (vk)
+		zwp_virtual_keyboard_v1_destroy(vk);
+	if (vk_mgr)
+		zwp_virtual_keyboard_manager_v1_destroy(vk_mgr);
 	if (keyboard)
 		wl_keyboard_destroy(keyboard);
 	if (pointer)

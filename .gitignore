@@ -1,5 +1,6 @@
 *.o
 screen-translate-overlay
-wlr-layer-shell-unstable-v1-client-protocol.h
-wlr-layer-shell-unstable-v1-protocol.c
+screen-translate-watcher
+*-protocol.h
+*-protocol.c
 .progress.md

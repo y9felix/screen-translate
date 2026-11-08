@@ -2,7 +2,22 @@
 set -euo pipefail
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "usage: screen-translate [-s|--select]"
+    echo "usage: screen-translate [-s|--select] [-m|--mode]"
+    exit 0
+fi
+
+if [ "${1:-}" = "-m" ] || [ "${1:-}" = "--mode" ]; then
+    PID_FILE="/run/user/${UID}/screen-translate-mode.pid"
+    if [ -f "${PID_FILE}" ] && kill -0 "$(<"${PID_FILE}")" 2>/dev/null; then
+        kill "$(<"${PID_FILE}")" 2>/dev/null || true
+        rm -f "${PID_FILE}"
+        pkill -TERM screen-translate-overlay 2>/dev/null || true
+        osd -n "screen-translate" "Translation Mode: OFF" 2>/dev/null || true
+    else
+        screen-translate-watcher &
+        echo $! > "${PID_FILE}"
+        osd -n "screen-translate" "Translation Mode: ON" 2>/dev/null || true
+    fi
     exit 0
 fi
 
