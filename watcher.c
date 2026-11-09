@@ -133,14 +133,14 @@ main(void)
 				if (ev.code == KEY_SPACE || ev.code == KEY_TAB) {
 					if (overlay_is_active())
 						continue;
-					arm_timer(tfd, 100);
+					arm_timer(tfd, 200);
 					continue;
 				}
 
 				if (overlay_is_active())
 					dismiss_overlay();
 
-				arm_timer(tfd, 100);
+				arm_timer(tfd, 200);
 			}
 		}
 
