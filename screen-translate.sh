@@ -6,8 +6,10 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     exit 0
 fi
 
+PID_FILE="/run/user/${UID}/screen-translate-mode.pid"
+OVERLAY_PID_FILE="/run/user/${UID}/screen-translate-overlay.pid"
+
 if [ "${1:-}" = "-m" ] || [ "${1:-}" = "--mode" ]; then
-    PID_FILE="/run/user/${UID}/screen-translate-mode.pid"
     if [ -f "${PID_FILE}" ] && kill -0 "$(<"${PID_FILE}")" 2>/dev/null; then
         kill "$(<"${PID_FILE}")" 2>/dev/null || true
         rm -f "${PID_FILE}"
@@ -32,7 +34,7 @@ VENV_LENS="${HOME}/.local/share/screen-translate/venv/bin/lens_scan"
 OVERLAY_PID=""
 
 cleanup() {
-    rm -f "${ORIG_IMG}" "${TRANS_IMG}"
+    rm -f "${ORIG_IMG}" "${TRANS_IMG}" "${OVERLAY_PID_FILE}"
     if [ -n "${OVERLAY_PID}" ]; then
         kill "${OVERLAY_PID}" 2>/dev/null || true
     fi
@@ -51,6 +53,7 @@ chmod 600 "${ORIG_IMG}"
 
 screen-translate-overlay "${ORIG_IMG}" "${TRANS_IMG}" &
 OVERLAY_PID=$!
+echo "${OVERLAY_PID}" > "${OVERLAY_PID_FILE}"
 
 if "${VENV_LENS}" "${ORIG_IMG}" -t en --vertical-text horizontal -to "${TRANS_IMG}" >/dev/null 2>&1; then
     if [ -f "${TRANS_IMG}" ] && [ -s "${TRANS_IMG}" ]; then
@@ -61,3 +64,4 @@ if "${VENV_LENS}" "${ORIG_IMG}" -t en --vertical-text horizontal -to "${TRANS_IM
 else
     wait "${OVERLAY_PID}" 2>/dev/null || true
 fi
+rm -f "${OVERLAY_PID_FILE}"

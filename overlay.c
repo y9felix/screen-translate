@@ -95,6 +95,7 @@ static int win_width;
 static int win_height;
 static int configured;
 static int show_trans;
+static int vk_keymap_set;
 static volatile sig_atomic_t running = 1;
 static volatile sig_atomic_t reload_requested;
 
@@ -316,8 +317,10 @@ keyboard_keymap(void *data, struct wl_keyboard *kb, uint32_t format,
 		return;
 	}
 
-	if (vk)
+	if (vk && !vk_keymap_set) {
+		vk_keymap_set = 1;
 		zwp_virtual_keyboard_v1_keymap(vk, format, fd, size);
+	}
 
 	map_str = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
 	if (map_str == MAP_FAILED) {
@@ -377,16 +380,27 @@ keyboard_key(void *data, struct wl_keyboard *kb, uint32_t serial,
 	if (sym == XKB_KEY_space || sym == XKB_KEY_Tab) {
 		show_trans = !show_trans;
 		render();
-	} else {
-		if (sym != XKB_KEY_Escape && sym != XKB_KEY_q && sym != XKB_KEY_Q) {
-			if (vk) {
-				zwp_virtual_keyboard_v1_key(vk, time, key, WL_KEYBOARD_KEY_STATE_PRESSED);
-				zwp_virtual_keyboard_v1_key(vk, time, key, WL_KEYBOARD_KEY_STATE_RELEASED);
-				wl_display_flush(display);
-			}
-		}
-		running = 0;
+		return;
 	}
+
+	if (layer_surface) {
+		zwlr_layer_surface_v1_destroy(layer_surface);
+		layer_surface = NULL;
+	}
+	if (surface) {
+		wl_surface_destroy(surface);
+		surface = NULL;
+	}
+	wl_display_roundtrip(display);
+
+	if (sym != XKB_KEY_Escape && sym != XKB_KEY_q && sym != XKB_KEY_Q) {
+		if (vk) {
+			zwp_virtual_keyboard_v1_key(vk, time, key, WL_KEYBOARD_KEY_STATE_PRESSED);
+			zwp_virtual_keyboard_v1_key(vk, time, key, WL_KEYBOARD_KEY_STATE_RELEASED);
+			wl_display_roundtrip(display);
+		}
+	}
+	running = 0;
 }
 
 static void
@@ -456,8 +470,17 @@ pointer_button(void *data, struct wl_pointer *pt, uint32_t serial,
 	(void)time;
 	(void)button;
 
-	if (state == WL_POINTER_BUTTON_STATE_PRESSED)
+	if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
+		if (layer_surface) {
+			zwlr_layer_surface_v1_destroy(layer_surface);
+			layer_surface = NULL;
+		}
+		if (surface) {
+			wl_surface_destroy(surface);
+			surface = NULL;
+		}
 		running = 0;
+	}
 }
 
 static void

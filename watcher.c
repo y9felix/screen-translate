@@ -44,13 +44,20 @@ is_modifier(uint16_t code)
 static int
 overlay_is_active(void)
 {
-	return system("pgrep -x screen-translate-overlay >/dev/null 2>&1") == 0;
-}
+	char path[128];
+	FILE *f;
+	pid_t pid;
 
-static void
-dismiss_overlay(void)
-{
-	system("pkill -TERM screen-translate-overlay 2>/dev/null");
+	snprintf(path, sizeof(path), "/run/user/%u/screen-translate-overlay.pid", (unsigned int)getuid());
+	f = fopen(path, "r");
+	if (!f)
+		return 0;
+	if (fscanf(f, "%d", &pid) != 1) {
+		fclose(f);
+		return 0;
+	}
+	fclose(f);
+	return kill(pid, 0) == 0;
 }
 
 static void
@@ -89,6 +96,7 @@ main(void)
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGINT, &sa, NULL);
+	signal(SIGCHLD, SIG_IGN);
 
 	kbd_fd = open("/dev/input/by-path/platform-i8042-serio-0-event-kbd", O_RDONLY | O_NONBLOCK);
 	if (kbd_fd < 0) {
@@ -125,22 +133,17 @@ main(void)
 
 				if (ev.code == KEY_ESC) {
 					disarm_timer(tfd);
-					if (overlay_is_active())
-						dismiss_overlay();
 					continue;
 				}
 
 				if (ev.code == KEY_SPACE || ev.code == KEY_TAB) {
 					if (overlay_is_active())
 						continue;
-					arm_timer(tfd, 200);
+					arm_timer(tfd, 100);
 					continue;
 				}
 
-				if (overlay_is_active())
-					dismiss_overlay();
-
-				arm_timer(tfd, 200);
+				arm_timer(tfd, 100);
 			}
 		}
 
