@@ -22,19 +22,29 @@ sig_handler(int sig)
 }
 
 static int
-is_modifier(uint16_t code)
+is_page_turn_key(uint16_t code)
 {
 	switch (code) {
-	case KEY_LEFTSHIFT:
-	case KEY_RIGHTSHIFT:
-	case KEY_LEFTCTRL:
-	case KEY_RIGHTCTRL:
-	case KEY_LEFTALT:
-	case KEY_RIGHTALT:
-	case KEY_LEFTMETA:
-	case KEY_RIGHTMETA:
-	case KEY_CAPSLOCK:
-	case KEY_FN:
+	case KEY_W:
+	case KEY_A:
+	case KEY_S:
+	case KEY_D:
+	case KEY_UP:
+	case KEY_DOWN:
+	case KEY_LEFT:
+	case KEY_RIGHT:
+	case KEY_PAGEUP:
+	case KEY_PAGEDOWN:
+	case KEY_HOME:
+	case KEY_END:
+	case KEY_ENTER:
+	case KEY_BACKSPACE:
+	case KEY_J:
+	case KEY_K:
+	case KEY_H:
+	case KEY_L:
+	case KEY_SPACE:
+	case KEY_TAB:
 		return 1;
 	default:
 		return 0;
@@ -128,13 +138,13 @@ main(void)
 				if (ev.type != EV_KEY || ev.value != 1)
 					continue;
 
-				if (is_modifier(ev.code))
-					continue;
-
 				if (ev.code == KEY_ESC) {
 					disarm_timer(tfd);
 					continue;
 				}
+
+				if (!is_page_turn_key(ev.code))
+					continue;
 
 				if (ev.code == KEY_SPACE || ev.code == KEY_TAB) {
 					if (overlay_is_active())
