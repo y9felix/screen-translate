@@ -55,13 +55,11 @@ screen-translate-overlay "${ORIG_IMG}" "${TRANS_IMG}" &
 OVERLAY_PID=$!
 echo "${OVERLAY_PID}" > "${OVERLAY_PID_FILE}"
 
-if "${VENV_LENS}" "${ORIG_IMG}" -t en --vertical-text horizontal -to "${TRANS_IMG}" >/dev/null 2>&1; then
+if "${VENV_LENS}" "${ORIG_IMG}" -t en --manga --manga-growth 2.0 --min-text-size 16 -to "${TRANS_IMG}" >/dev/null 2>&1; then
     if [ -f "${TRANS_IMG}" ] && [ -s "${TRANS_IMG}" ]; then
         chmod 600 "${TRANS_IMG}" 2>/dev/null || true
         kill -SIGUSR1 "${OVERLAY_PID}" 2>/dev/null || true
     fi
-    wait "${OVERLAY_PID}" 2>/dev/null || true
-else
-    wait "${OVERLAY_PID}" 2>/dev/null || true
 fi
+wait "${OVERLAY_PID}" 2>/dev/null || true
 rm -f "${OVERLAY_PID_FILE}"

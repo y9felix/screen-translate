@@ -23,7 +23,7 @@ d.text((50, 80), "日本語の設定画面", font=font, fill=(0, 0, 0))
 img.save("/tmp/test_lens_in.png")
 EOF
 
-"${LENS_BIN}" "${TEST_IN}" -t en --vertical-text horizontal -to "${TEST_OUT}" >/dev/null 2>&1
+"${LENS_BIN}" "${TEST_IN}" -t en --manga --manga-growth 2.0 --min-text-size 16 -to "${TEST_OUT}" >/dev/null 2>&1
 
 if [ -f "${TEST_OUT}" ] && [ -s "${TEST_OUT}" ]; then
     echo "PASS: translation run produced output image"

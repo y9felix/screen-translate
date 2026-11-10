@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,53 +18,52 @@
 #include "virtual-keyboard-unstable-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
+#define SHM_NAME "screen-translate-shm"
+
 struct buffer {
 	struct wl_buffer *wl_buf;
 	void *data;
 	size_t size;
-	int width;
-	int height;
 };
 
-static void die(const char *msg);
 static int create_shm_buffer(int width, int height, struct buffer *b);
 static void destroy_shm_buffer(struct buffer *b);
-static void render(void);
-static void load_images(void);
-static void sig_handler(int sig);
-static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *surface,
-    uint32_t serial, uint32_t width, uint32_t height);
-static void layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *surface);
-static void keyboard_keymap(void *data, struct wl_keyboard *kb, uint32_t format,
-    int32_t fd, uint32_t size);
+static void eprintf(const char *fmt, ...);
 static void keyboard_enter(void *data, struct wl_keyboard *kb, uint32_t serial,
     struct wl_surface *surf, struct wl_array *keys);
-static void keyboard_leave(void *data, struct wl_keyboard *kb, uint32_t serial,
-    struct wl_surface *surf);
 static void keyboard_key(void *data, struct wl_keyboard *kb, uint32_t serial,
     uint32_t time, uint32_t key, uint32_t state);
+static void keyboard_keymap(void *data, struct wl_keyboard *kb, uint32_t format,
+    int32_t fd, uint32_t size);
+static void keyboard_leave(void *data, struct wl_keyboard *kb, uint32_t serial,
+    struct wl_surface *surf);
 static void keyboard_modifiers(void *data, struct wl_keyboard *kb, uint32_t serial,
     uint32_t mods_depressed, uint32_t mods_latched, uint32_t mods_locked, uint32_t group);
 static void keyboard_repeat_info(void *data, struct wl_keyboard *kb, int32_t rate, int32_t delay);
+static void layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *ls);
+static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *ls,
+    uint32_t serial, uint32_t width, uint32_t height);
+static void load_images(void);
+static cairo_surface_t *load_png(const char *path);
+static void pointer_axis(void *data, struct wl_pointer *pt, uint32_t time,
+    uint32_t axis, wl_fixed_t value);
+static void pointer_button(void *data, struct wl_pointer *pt, uint32_t serial,
+    uint32_t time, uint32_t button, uint32_t state);
 static void pointer_enter(void *data, struct wl_pointer *pt, uint32_t serial,
     struct wl_surface *surf, wl_fixed_t sx, wl_fixed_t sy);
 static void pointer_leave(void *data, struct wl_pointer *pt, uint32_t serial,
     struct wl_surface *surf);
 static void pointer_motion(void *data, struct wl_pointer *pt, uint32_t time,
     wl_fixed_t sx, wl_fixed_t sy);
-static void pointer_button(void *data, struct wl_pointer *pt, uint32_t serial,
-    uint32_t time, uint32_t button, uint32_t state);
-static void pointer_axis(void *data, struct wl_pointer *pt, uint32_t time,
-    uint32_t axis, wl_fixed_t value);
-static void pointer_frame(void *data, struct wl_pointer *pt);
-static void pointer_axis_source(void *data, struct wl_pointer *pt, uint32_t axis_source);
-static void pointer_axis_stop(void *data, struct wl_pointer *pt, uint32_t time, uint32_t axis);
-static void pointer_axis_discrete(void *data, struct wl_pointer *pt, uint32_t axis, int32_t discrete);
-static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t caps);
-static void seat_name(void *data, struct wl_seat *seat, const char *name);
 static void registry_global(void *data, struct wl_registry *reg, uint32_t name,
     const char *interface, uint32_t version);
 static void registry_global_remove(void *data, struct wl_registry *reg, uint32_t name);
+static void render(void);
+static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t caps);
+static void seat_name(void *data, struct wl_seat *seat, const char *name);
+static void sig_handler(int sig);
+static void unmap_surface(void);
+static void usage(void);
 
 const struct wl_interface xdg_popup_interface;
 
@@ -90,6 +90,7 @@ static cairo_surface_t *trans_surf;
 
 static const char *orig_path;
 static const char *trans_path;
+static char *argv0;
 
 static int win_width;
 static int win_height;
@@ -119,10 +120,6 @@ static const struct wl_pointer_listener pointer_listener = {
 	.motion = pointer_motion,
 	.button = pointer_button,
 	.axis = pointer_axis,
-	.frame = pointer_frame,
-	.axis_source = pointer_axis_source,
-	.axis_stop = pointer_axis_stop,
-	.axis_discrete = pointer_axis_discrete,
 };
 
 static const struct wl_seat_listener seat_listener = {
@@ -135,44 +132,31 @@ static const struct wl_registry_listener registry_listener = {
 	.global_remove = registry_global_remove,
 };
 
-static void
-die(const char *msg)
-{
-	fprintf(stderr, "%s: %s\n", msg, strerror(errno));
-	exit(1);
-}
-
 static int
 create_shm_buffer(int width, int height, struct buffer *b)
 {
-	int fd;
-	size_t sz;
 	struct wl_shm_pool *pool;
+	size_t sz;
+	int fd;
 
 	sz = (size_t)width * (size_t)height * 4;
-	fd = memfd_create("screen-translate-shm", MFD_CLOEXEC);
-	if (fd < 0)
+	if ((fd = memfd_create(SHM_NAME, MFD_CLOEXEC)) < 0)
 		return -1;
 	if (ftruncate(fd, sz) < 0) {
 		close(fd);
 		return -1;
 	}
-
 	b->data = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (b->data == MAP_FAILED) {
 		close(fd);
 		return -1;
 	}
-
 	pool = wl_shm_create_pool(shm, fd, sz);
 	b->wl_buf = wl_shm_pool_create_buffer(pool, 0, width, height, width * 4,
 	    WL_SHM_FORMAT_ARGB8888);
 	wl_shm_pool_destroy(pool);
 	close(fd);
-
 	b->size = sz;
-	b->width = width;
-	b->height = height;
 	return 0;
 }
 
@@ -183,7 +167,7 @@ destroy_shm_buffer(struct buffer *b)
 		wl_buffer_destroy(b->wl_buf);
 		b->wl_buf = NULL;
 	}
-	if (b->data && b->data != MAP_FAILED) {
+	if (b->data) {
 		munmap(b->data, b->size);
 		b->data = NULL;
 	}
@@ -191,116 +175,56 @@ destroy_shm_buffer(struct buffer *b)
 }
 
 static void
-load_images(void)
+eprintf(const char *fmt, ...)
 {
-	if (!orig_surf && orig_path) {
-		orig_surf = cairo_image_surface_create_from_png(orig_path);
-		if (cairo_surface_status(orig_surf) != CAIRO_STATUS_SUCCESS) {
-			cairo_surface_destroy(orig_surf);
-			orig_surf = NULL;
-		}
-	}
-	if (trans_path && access(trans_path, R_OK) == 0) {
-		if (trans_surf)
-			cairo_surface_destroy(trans_surf);
-		trans_surf = cairo_image_surface_create_from_png(trans_path);
-		if (cairo_surface_status(trans_surf) != CAIRO_STATUS_SUCCESS) {
-			cairo_surface_destroy(trans_surf);
-			trans_surf = NULL;
-		} else {
-			show_trans = 1;
-		}
-	}
+	va_list ap;
+
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	exit(1);
 }
 
 static void
-render(void)
+keyboard_enter(void *data, struct wl_keyboard *kb, uint32_t serial,
+    struct wl_surface *surf, struct wl_array *keys)
 {
-	cairo_surface_t *target_cairo;
-	cairo_t *cr;
-	cairo_surface_t *src;
-	int src_w;
-	int src_h;
+	(void)data;
+	(void)kb;
+	(void)serial;
+	(void)surf;
+	(void)keys;
+}
 
-	if (!configured || !win_buf.data)
+static void
+keyboard_key(void *data, struct wl_keyboard *kb, uint32_t serial,
+    uint32_t time, uint32_t key, uint32_t state)
+{
+	xkb_keysym_t sym;
+
+	(void)data;
+	(void)kb;
+	(void)serial;
+
+	if (state != WL_KEYBOARD_KEY_STATE_PRESSED || !xkb_st)
 		return;
 
-	target_cairo = cairo_image_surface_create_for_data(
-	    (unsigned char *)win_buf.data, CAIRO_FORMAT_ARGB32,
-	    win_width, win_height, win_width * 4);
-	cr = cairo_create(target_cairo);
+	sym = xkb_state_key_get_one_sym(xkb_st, key + 8);
+	if (sym == XKB_KEY_space || sym == XKB_KEY_Tab) {
+		show_trans = !show_trans;
+		render();
+		return;
+	}
 
-	cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
-	cairo_paint(cr);
+	unmap_surface();
 
-	src = (show_trans && trans_surf) ? trans_surf : orig_surf;
-	if (src) {
-		src_w = cairo_image_surface_get_width(src);
-		src_h = cairo_image_surface_get_height(src);
-		if (src_w > 0 && src_h > 0) {
-			cairo_save(cr);
-			cairo_scale(cr, (double)win_width / (double)src_w,
-			    (double)win_height / (double)src_h);
-			cairo_set_source_surface(cr, src, 0.0, 0.0);
-			cairo_paint(cr);
-			cairo_restore(cr);
+	if (sym != XKB_KEY_Escape && sym != XKB_KEY_q && sym != XKB_KEY_Q) {
+		if (vk) {
+			zwp_virtual_keyboard_v1_key(vk, time, key, WL_KEYBOARD_KEY_STATE_PRESSED);
+			zwp_virtual_keyboard_v1_key(vk, time, key, WL_KEYBOARD_KEY_STATE_RELEASED);
+			wl_display_roundtrip(display);
 		}
 	}
-
-	if (!trans_surf) {
-		cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.75);
-		cairo_rectangle(cr, (win_width - 200) / 2.0, 24.0, 200.0, 40.0);
-		cairo_fill(cr);
-
-		cairo_select_font_face(cr, "sans-serif", CAIRO_FONT_SLANT_NORMAL,
-		    CAIRO_FONT_WEIGHT_BOLD);
-		cairo_set_font_size(cr, 16.0);
-		cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-		cairo_move_to(cr, (win_width - 200) / 2.0 + 45.0, 49.0);
-		cairo_show_text(cr, "Translating...");
-	}
-
-	cairo_destroy(cr);
-	cairo_surface_destroy(target_cairo);
-
-	wl_surface_attach(surface, win_buf.wl_buf, 0, 0);
-	wl_surface_damage(surface, 0, 0, win_width, win_height);
-	wl_surface_commit(surface);
-}
-
-static void
-sig_handler(int sig)
-{
-	if (sig == SIGUSR1)
-		reload_requested = 1;
-	else
-		running = 0;
-}
-
-static void
-layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *ls,
-    uint32_t serial, uint32_t width, uint32_t height)
-{
-	(void)data;
-	zwlr_layer_surface_v1_ack_configure(ls, serial);
-
-	if (win_width != (int)width || win_height != (int)height || !win_buf.wl_buf) {
-		win_width = (int)width;
-		win_height = (int)height;
-		destroy_shm_buffer(&win_buf);
-		if (create_shm_buffer(win_width, win_height, &win_buf) < 0)
-			die("create_shm_buffer failed");
-	}
-
-	configured = 1;
-	render();
-}
-
-static void
-layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *ls)
-{
-	(void)data;
-	(void)ls;
 	running = 0;
 }
 
@@ -343,17 +267,6 @@ keyboard_keymap(void *data, struct wl_keyboard *kb, uint32_t format,
 }
 
 static void
-keyboard_enter(void *data, struct wl_keyboard *kb, uint32_t serial,
-    struct wl_surface *surf, struct wl_array *keys)
-{
-	(void)data;
-	(void)kb;
-	(void)serial;
-	(void)surf;
-	(void)keys;
-}
-
-static void
 keyboard_leave(void *data, struct wl_keyboard *kb, uint32_t serial,
     struct wl_surface *surf)
 {
@@ -361,46 +274,6 @@ keyboard_leave(void *data, struct wl_keyboard *kb, uint32_t serial,
 	(void)kb;
 	(void)serial;
 	(void)surf;
-}
-
-static void
-keyboard_key(void *data, struct wl_keyboard *kb, uint32_t serial,
-    uint32_t time, uint32_t key, uint32_t state)
-{
-	xkb_keysym_t sym;
-
-	(void)data;
-	(void)kb;
-	(void)serial;
-
-	if (state != WL_KEYBOARD_KEY_STATE_PRESSED || !xkb_st)
-		return;
-
-	sym = xkb_state_key_get_one_sym(xkb_st, key + 8);
-	if (sym == XKB_KEY_space || sym == XKB_KEY_Tab) {
-		show_trans = !show_trans;
-		render();
-		return;
-	}
-
-	if (layer_surface) {
-		zwlr_layer_surface_v1_destroy(layer_surface);
-		layer_surface = NULL;
-	}
-	if (surface) {
-		wl_surface_destroy(surface);
-		surface = NULL;
-	}
-	wl_display_roundtrip(display);
-
-	if (sym != XKB_KEY_Escape && sym != XKB_KEY_q && sym != XKB_KEY_Q) {
-		if (vk) {
-			zwp_virtual_keyboard_v1_key(vk, time, key, WL_KEYBOARD_KEY_STATE_PRESSED);
-			zwp_virtual_keyboard_v1_key(vk, time, key, WL_KEYBOARD_KEY_STATE_RELEASED);
-			wl_display_roundtrip(display);
-		}
-	}
-	running = 0;
 }
 
 static void
@@ -425,6 +298,89 @@ keyboard_repeat_info(void *data, struct wl_keyboard *kb, int32_t rate, int32_t d
 	(void)kb;
 	(void)rate;
 	(void)delay;
+}
+
+static void
+layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *ls)
+{
+	(void)data;
+	(void)ls;
+	running = 0;
+}
+
+static void
+layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *ls,
+    uint32_t serial, uint32_t width, uint32_t height)
+{
+	(void)data;
+	zwlr_layer_surface_v1_ack_configure(ls, serial);
+
+	if (win_width != (int)width || win_height != (int)height || !win_buf.wl_buf) {
+		win_width = (int)width;
+		win_height = (int)height;
+		destroy_shm_buffer(&win_buf);
+		if (create_shm_buffer(win_width, win_height, &win_buf) < 0)
+			eprintf("create_shm_buffer failed\n");
+	}
+
+	configured = 1;
+	render();
+}
+
+static void
+load_images(void)
+{
+	cairo_surface_t *s;
+
+	if (!orig_surf)
+		orig_surf = load_png(orig_path);
+	if ((s = load_png(trans_path))) {
+		if (trans_surf)
+			cairo_surface_destroy(trans_surf);
+		trans_surf = s;
+		show_trans = 1;
+	}
+}
+
+static cairo_surface_t *
+load_png(const char *path)
+{
+	cairo_surface_t *s;
+
+	if (!path || !(s = cairo_image_surface_create_from_png(path)))
+		return NULL;
+	if (cairo_surface_status(s) != CAIRO_STATUS_SUCCESS) {
+		cairo_surface_destroy(s);
+		return NULL;
+	}
+	return s;
+}
+
+static void
+pointer_axis(void *data, struct wl_pointer *pt, uint32_t time,
+    uint32_t axis, wl_fixed_t value)
+{
+	(void)data;
+	(void)pt;
+	(void)time;
+	(void)axis;
+	(void)value;
+}
+
+static void
+pointer_button(void *data, struct wl_pointer *pt, uint32_t serial,
+    uint32_t time, uint32_t button, uint32_t state)
+{
+	(void)data;
+	(void)pt;
+	(void)serial;
+	(void)time;
+	(void)button;
+
+	if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
+		unmap_surface();
+		running = 0;
+	}
 }
 
 static void
@@ -461,70 +417,88 @@ pointer_motion(void *data, struct wl_pointer *pt, uint32_t time,
 }
 
 static void
-pointer_button(void *data, struct wl_pointer *pt, uint32_t serial,
-    uint32_t time, uint32_t button, uint32_t state)
+registry_global(void *data, struct wl_registry *reg, uint32_t name,
+    const char *interface, uint32_t version)
 {
 	(void)data;
-	(void)pt;
-	(void)serial;
-	(void)time;
-	(void)button;
-
-	if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
-		if (layer_surface) {
-			zwlr_layer_surface_v1_destroy(layer_surface);
-			layer_surface = NULL;
-		}
-		if (surface) {
-			wl_surface_destroy(surface);
-			surface = NULL;
-		}
-		running = 0;
+	(void)version;
+	if (strcmp(interface, wl_compositor_interface.name) == 0) {
+		compositor = wl_registry_bind(reg, name, &wl_compositor_interface, 4);
+	} else if (strcmp(interface, wl_shm_interface.name) == 0) {
+		shm = wl_registry_bind(reg, name, &wl_shm_interface, 1);
+	} else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
+		layer_shell = wl_registry_bind(reg, name, &zwlr_layer_shell_v1_interface, 1);
+	} else if (strcmp(interface, zwp_virtual_keyboard_manager_v1_interface.name) == 0) {
+		vk_mgr = wl_registry_bind(reg, name, &zwp_virtual_keyboard_manager_v1_interface, 1);
+	} else if (strcmp(interface, wl_seat_interface.name) == 0) {
+		seat = wl_registry_bind(reg, name, &wl_seat_interface, 1);
+		wl_seat_add_listener(seat, &seat_listener, NULL);
 	}
 }
 
 static void
-pointer_axis(void *data, struct wl_pointer *pt, uint32_t time,
-    uint32_t axis, wl_fixed_t value)
+registry_global_remove(void *data, struct wl_registry *reg, uint32_t name)
 {
 	(void)data;
-	(void)pt;
-	(void)time;
-	(void)axis;
-	(void)value;
+	(void)reg;
+	(void)name;
 }
 
 static void
-pointer_frame(void *data, struct wl_pointer *pt)
+render(void)
 {
-	(void)data;
-	(void)pt;
-}
+	cairo_surface_t *target_cairo;
+	cairo_surface_t *src;
+	cairo_t *cr;
+	double x;
+	int src_w;
+	int src_h;
 
-static void
-pointer_axis_source(void *data, struct wl_pointer *pt, uint32_t axis_source)
-{
-	(void)data;
-	(void)pt;
-	(void)axis_source;
-}
+	if (!configured || !win_buf.data)
+		return;
 
-static void
-pointer_axis_stop(void *data, struct wl_pointer *pt, uint32_t time, uint32_t axis)
-{
-	(void)data;
-	(void)pt;
-	(void)time;
-	(void)axis;
-}
+	target_cairo = cairo_image_surface_create_for_data(
+	    (unsigned char *)win_buf.data, CAIRO_FORMAT_ARGB32,
+	    win_width, win_height, win_width * 4);
+	cr = cairo_create(target_cairo);
 
-static void
-pointer_axis_discrete(void *data, struct wl_pointer *pt, uint32_t axis, int32_t discrete)
-{
-	(void)data;
-	(void)pt;
-	(void)axis;
-	(void)discrete;
+	cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
+	cairo_paint(cr);
+
+	src = (show_trans && trans_surf) ? trans_surf : orig_surf;
+	if (src) {
+		src_w = cairo_image_surface_get_width(src);
+		src_h = cairo_image_surface_get_height(src);
+		if (src_w > 0 && src_h > 0) {
+			cairo_save(cr);
+			cairo_scale(cr, (double)win_width / (double)src_w,
+			    (double)win_height / (double)src_h);
+			cairo_set_source_surface(cr, src, 0.0, 0.0);
+			cairo_paint(cr);
+			cairo_restore(cr);
+		}
+	}
+
+	if (!trans_surf) {
+		x = (win_width - 200) / 2.0;
+		cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.75);
+		cairo_rectangle(cr, x, 24.0, 200.0, 40.0);
+		cairo_fill(cr);
+
+		cairo_select_font_face(cr, "sans-serif", CAIRO_FONT_SLANT_NORMAL,
+		    CAIRO_FONT_WEIGHT_BOLD);
+		cairo_set_font_size(cr, 16.0);
+		cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+		cairo_move_to(cr, x + 45.0, 49.0);
+		cairo_show_text(cr, "Translating...");
+	}
+
+	cairo_destroy(cr);
+	cairo_surface_destroy(target_cairo);
+
+	wl_surface_attach(surface, win_buf.wl_buf, 0, 0);
+	wl_surface_damage(surface, 0, 0, win_width, win_height);
+	wl_surface_commit(surface);
 }
 
 static void
@@ -557,31 +531,34 @@ seat_name(void *data, struct wl_seat *s, const char *name)
 }
 
 static void
-registry_global(void *data, struct wl_registry *reg, uint32_t name,
-    const char *interface, uint32_t version)
+sig_handler(int sig)
 {
-	(void)data;
-	(void)version;
-	if (strcmp(interface, wl_compositor_interface.name) == 0) {
-		compositor = wl_registry_bind(reg, name, &wl_compositor_interface, 4);
-	} else if (strcmp(interface, wl_shm_interface.name) == 0) {
-		shm = wl_registry_bind(reg, name, &wl_shm_interface, 1);
-	} else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
-		layer_shell = wl_registry_bind(reg, name, &zwlr_layer_shell_v1_interface, 1);
-	} else if (strcmp(interface, zwp_virtual_keyboard_manager_v1_interface.name) == 0) {
-		vk_mgr = wl_registry_bind(reg, name, &zwp_virtual_keyboard_manager_v1_interface, 1);
-	} else if (strcmp(interface, wl_seat_interface.name) == 0) {
-		seat = wl_registry_bind(reg, name, &wl_seat_interface, 5);
-		wl_seat_add_listener(seat, &seat_listener, NULL);
-	}
+	if (sig == SIGUSR1)
+		reload_requested = 1;
+	else
+		running = 0;
 }
 
 static void
-registry_global_remove(void *data, struct wl_registry *reg, uint32_t name)
+unmap_surface(void)
 {
-	(void)data;
-	(void)reg;
-	(void)name;
+	if (layer_surface) {
+		zwlr_layer_surface_v1_destroy(layer_surface);
+		layer_surface = NULL;
+	}
+	if (surface) {
+		wl_surface_destroy(surface);
+		surface = NULL;
+	}
+	if (display)
+		wl_display_roundtrip(display);
+}
+
+static void
+usage(void)
+{
+	fprintf(stderr, "usage: %s <orig.png> [trans.png]\n", argv0);
+	exit(1);
 }
 
 int
@@ -591,18 +568,16 @@ main(int argc, char *argv[])
 	struct pollfd pfd;
 	int ret;
 
-	if (argc < 2 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
-		fprintf(stderr, "usage: screen-translate-overlay <orig.png> [trans.png]\n");
-		return 1;
-	}
+	argv0 = argv[0];
+	if (argc < 2 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)
+		usage();
 
 	orig_path = argv[1];
 	if (argc >= 3)
 		trans_path = argv[2];
 
-	xkb_ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-	if (!xkb_ctx)
-		die("xkb_context_new failed");
+	if (!(xkb_ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS)))
+		eprintf("xkb_context_new failed\n");
 
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = sig_handler;
@@ -611,28 +586,26 @@ main(int argc, char *argv[])
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGINT, &sa, NULL);
 
-	display = wl_display_connect(NULL);
-	if (!display)
-		die("wl_display_connect failed");
+	if (!(display = wl_display_connect(NULL)))
+		eprintf("wl_display_connect failed\n");
 
 	registry = wl_display_get_registry(display);
 	wl_registry_add_listener(registry, &registry_listener, NULL);
 	wl_display_roundtrip(display);
 
 	if (!compositor || !shm || !layer_shell)
-		die("missing required wayland globals");
+		eprintf("missing required wayland globals\n");
 
 	if (vk_mgr && seat)
 		vk = zwp_virtual_keyboard_manager_v1_create_virtual_keyboard(vk_mgr, seat);
 
-	surface = wl_compositor_create_surface(compositor);
-	if (!surface)
-		die("wl_compositor_create_surface failed");
+	if (!(surface = wl_compositor_create_surface(compositor)))
+		eprintf("wl_compositor_create_surface failed\n");
 
 	layer_surface = zwlr_layer_shell_v1_get_layer_surface(layer_shell,
 	    surface, NULL, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "screen-translate");
 	if (!layer_surface)
-		die("zwlr_layer_shell_v1_get_layer_surface failed");
+		eprintf("zwlr_layer_shell_v1_get_layer_surface failed\n");
 
 	zwlr_layer_surface_v1_set_anchor(layer_surface,
 	    ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
@@ -702,10 +675,7 @@ main(int argc, char *argv[])
 		wl_pointer_destroy(pointer);
 	if (seat)
 		wl_seat_destroy(seat);
-	if (layer_surface)
-		zwlr_layer_surface_v1_destroy(layer_surface);
-	if (surface)
-		wl_surface_destroy(surface);
+	unmap_surface();
 	if (layer_shell)
 		zwlr_layer_shell_v1_destroy(layer_shell);
 	if (shm)

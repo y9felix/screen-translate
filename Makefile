@@ -47,11 +47,12 @@ $(PROG): $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $(OBJ) $(LDFLAGS)
 
 $(WATCHER): watcher.c
-	$(CC) -std=c99 -pedantic -Wall -Wextra -O2 $< -o $@
+	$(CC) $(CFLAGS) $< -o $@
 
 install: all
 	install -D -m 755 $(PROG) $(DESTDIR)$(PREFIX)/bin/$(PROG)
 	install -D -m 755 $(WATCHER) $(DESTDIR)$(PREFIX)/bin/$(WATCHER)
+	install -D -m 755 screen-translate.sh $(DESTDIR)$(PREFIX)/bin/screen-translate
 
 clean:
 	rm -f $(PROG) $(WATCHER) $(OBJ) $(LAYER_H) $(LAYER_C) $(VKBD_H) $(VKBD_C)

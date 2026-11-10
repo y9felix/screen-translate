@@ -5,6 +5,7 @@
 #include <linux/input.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,66 +13,68 @@
 #include <sys/timerfd.h>
 #include <unistd.h>
 
+#define KBD_DEV "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
+#define PID_FMT "/run/user/%u/screen-translate-overlay.pid"
+
+static void eprintf(const char *fmt, ...);
+static int is_page_turn_key(uint16_t code);
+static int overlay_active(void);
+static void set_timer(int tfd, int ms);
+static void sig_handler(int sig);
+static void spawn_translate(void);
+
 static volatile sig_atomic_t running = 1;
 
+static const uint16_t page_keys[] = {
+	KEY_W, KEY_A, KEY_S, KEY_D,
+	KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT,
+	KEY_PAGEUP, KEY_PAGEDOWN, KEY_HOME, KEY_END,
+	KEY_ENTER, KEY_BACKSPACE,
+	KEY_J, KEY_K, KEY_H, KEY_L,
+	KEY_SPACE, KEY_TAB
+};
+
 static void
-sig_handler(int sig)
+eprintf(const char *fmt, ...)
 {
-	(void)sig;
-	running = 0;
+	va_list ap;
+
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	exit(1);
 }
 
 static int
 is_page_turn_key(uint16_t code)
 {
-	switch (code) {
-	case KEY_W:
-	case KEY_A:
-	case KEY_S:
-	case KEY_D:
-	case KEY_UP:
-	case KEY_DOWN:
-	case KEY_LEFT:
-	case KEY_RIGHT:
-	case KEY_PAGEUP:
-	case KEY_PAGEDOWN:
-	case KEY_HOME:
-	case KEY_END:
-	case KEY_ENTER:
-	case KEY_BACKSPACE:
-	case KEY_J:
-	case KEY_K:
-	case KEY_H:
-	case KEY_L:
-	case KEY_SPACE:
-	case KEY_TAB:
-		return 1;
-	default:
-		return 0;
-	}
+	size_t i;
+
+	for (i = 0; i < sizeof(page_keys) / sizeof(page_keys[0]); i++)
+		if (page_keys[i] == code)
+			return 1;
+	return 0;
 }
 
 static int
-overlay_is_active(void)
+overlay_active(void)
 {
-	char path[128];
-	FILE *f;
+	char path[64];
+	FILE *fp;
 	pid_t pid;
+	int active = 0;
 
-	snprintf(path, sizeof(path), "/run/user/%u/screen-translate-overlay.pid", (unsigned int)getuid());
-	f = fopen(path, "r");
-	if (!f)
+	snprintf(path, sizeof(path), PID_FMT, (unsigned int)getuid());
+	if (!(fp = fopen(path, "r")))
 		return 0;
-	if (fscanf(f, "%d", &pid) != 1) {
-		fclose(f);
-		return 0;
-	}
-	fclose(f);
-	return kill(pid, 0) == 0;
+	if (fscanf(fp, "%d", &pid) == 1)
+		active = (kill(pid, 0) == 0);
+	fclose(fp);
+	return active;
 }
 
 static void
-arm_timer(int tfd, int ms)
+set_timer(int tfd, int ms)
 {
 	struct itimerspec its;
 
@@ -82,12 +85,27 @@ arm_timer(int tfd, int ms)
 }
 
 static void
-disarm_timer(int tfd)
+sig_handler(int sig)
 {
-	struct itimerspec its;
+	(void)sig;
+	running = 0;
+}
 
-	memset(&its, 0, sizeof(its));
-	timerfd_settime(tfd, 0, &its, NULL);
+static void
+spawn_translate(void)
+{
+	int fd;
+
+	if (fork() != 0)
+		return;
+	if ((fd = open("/dev/null", O_RDWR)) >= 0) {
+		dup2(fd, STDIN_FILENO);
+		dup2(fd, STDOUT_FILENO);
+		dup2(fd, STDERR_FILENO);
+		close(fd);
+	}
+	execl("/usr/local/bin/screen-translate", "screen-translate", (char *)NULL);
+	_exit(1);
 }
 
 int
@@ -96,10 +114,9 @@ main(void)
 	struct sigaction sa;
 	struct pollfd pfds[2];
 	struct input_event ev;
-	uint64_t expirations;
-	int kbd_fd;
+	uint64_t exp;
+	int kfd;
 	int tfd;
-	ssize_t n;
 
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = sig_handler;
@@ -108,20 +125,15 @@ main(void)
 	sigaction(SIGINT, &sa, NULL);
 	signal(SIGCHLD, SIG_IGN);
 
-	kbd_fd = open("/dev/input/by-path/platform-i8042-serio-0-event-kbd", O_RDONLY | O_NONBLOCK);
-	if (kbd_fd < 0) {
-		fprintf(stderr, "failed to open keyboard device: %s\n", strerror(errno));
-		return 1;
+	if ((kfd = open(KBD_DEV, O_RDONLY | O_NONBLOCK)) < 0)
+		eprintf("failed to open keyboard device: %s\n", strerror(errno));
+
+	if ((tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC)) < 0) {
+		close(kfd);
+		eprintf("failed to create timerfd: %s\n", strerror(errno));
 	}
 
-	tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-	if (tfd < 0) {
-		fprintf(stderr, "failed to create timerfd: %s\n", strerror(errno));
-		close(kbd_fd);
-		return 1;
-	}
-
-	pfds[0].fd = kbd_fd;
+	pfds[0].fd = kfd;
 	pfds[0].events = POLLIN;
 	pfds[1].fd = tfd;
 	pfds[1].events = POLLIN;
@@ -134,48 +146,32 @@ main(void)
 		}
 
 		if (pfds[0].revents & POLLIN) {
-			while ((n = read(kbd_fd, &ev, sizeof(ev))) == (ssize_t)sizeof(ev)) {
+			while (read(kfd, &ev, sizeof(ev)) == (ssize_t)sizeof(ev)) {
 				if (ev.type != EV_KEY || ev.value != 1)
 					continue;
 
 				if (ev.code == KEY_ESC) {
-					disarm_timer(tfd);
+					set_timer(tfd, 0);
 					continue;
 				}
 
 				if (!is_page_turn_key(ev.code))
 					continue;
 
-				if (ev.code == KEY_SPACE || ev.code == KEY_TAB) {
-					if (overlay_is_active())
-						continue;
-					arm_timer(tfd, 100);
+				if ((ev.code == KEY_SPACE || ev.code == KEY_TAB) && overlay_active())
 					continue;
-				}
 
-				arm_timer(tfd, 100);
+				set_timer(tfd, 100);
 			}
 		}
 
 		if (pfds[1].revents & POLLIN) {
-			if (read(tfd, &expirations, sizeof(expirations)) > 0) {
-				if (fork() == 0) {
-					int devnull;
-					devnull = open("/dev/null", O_RDWR);
-					if (devnull >= 0) {
-						dup2(devnull, STDIN_FILENO);
-						dup2(devnull, STDOUT_FILENO);
-						dup2(devnull, STDERR_FILENO);
-						close(devnull);
-					}
-					execl("/usr/local/bin/screen-translate", "screen-translate", (char *)NULL);
-					_exit(1);
-				}
-			}
+			if (read(tfd, &exp, sizeof(exp)) > 0)
+				spawn_translate();
 		}
 	}
 
 	close(tfd);
-	close(kbd_fd);
+	close(kfd);
 	return 0;
 }
