@@ -52,6 +52,7 @@ $(WATCHER): watcher.c
 install: all
 	install -D -m 755 $(PROG) $(DESTDIR)$(PREFIX)/bin/$(PROG)
 	install -D -m 755 $(WATCHER) $(DESTDIR)$(PREFIX)/bin/$(WATCHER)
+	install -D -m 755 render.py $(DESTDIR)$(PREFIX)/bin/screen-translate-render
 	install -D -m 755 screen-translate.sh $(DESTDIR)$(PREFIX)/bin/screen-translate
 
 clean:

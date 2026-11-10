@@ -10,6 +10,8 @@ test_cmd() {
 
 test_cmd "screen-translate"
 test_cmd "screen-translate-overlay"
+test_cmd "screen-translate-render"
+test_cmd "screen-translate-watcher"
 test_cmd "grim"
 test_cmd "wayland-scanner"
 
