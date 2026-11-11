@@ -1,11 +1,11 @@
 #define _GNU_SOURCE
 
+#include <err.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/input.h>
 #include <poll.h>
 #include <signal.h>
-#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,68 +13,56 @@
 #include <sys/timerfd.h>
 #include <unistd.h>
 
-#define KBD_DEV "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
-#define PID_FMT "/run/user/%u/screen-translate-overlay.pid"
+#define KBDDEV "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
+#define PIDFMT "/run/user/%u/screen-translate-overlay.pid"
 
-static void eprintf(const char *fmt, ...);
-static int is_page_turn_key(uint16_t code);
-static int overlay_active(void);
-static void set_timer(int tfd, int ms);
-static void sig_handler(int sig);
-static void spawn_translate(void);
+static int ispageturnkey(uint16_t code);
+static int overlayactive(void);
+static void settimer(int tfd, int ms);
+static void sighandler(int sig);
+static void spawntranslate(void);
 
 static volatile sig_atomic_t running = 1;
 
-static const uint16_t page_keys[] = {
-	KEY_W, KEY_A, KEY_S, KEY_D,
-	KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT,
-	KEY_PAGEUP, KEY_PAGEDOWN, KEY_HOME, KEY_END,
-	KEY_ENTER, KEY_BACKSPACE,
-	KEY_J, KEY_K, KEY_H, KEY_L,
-	KEY_SPACE, KEY_TAB
-};
-
-static void
-eprintf(const char *fmt, ...)
-{
-	va_list ap;
-
-	va_start(ap, fmt);
-	vfprintf(stderr, fmt, ap);
-	va_end(ap);
-	exit(1);
-}
-
 static int
-is_page_turn_key(uint16_t code)
+ispageturnkey(uint16_t code)
 {
+	static const uint16_t keys[] = {
+		KEY_W, KEY_A, KEY_S, KEY_D,
+		KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT,
+		KEY_PAGEUP, KEY_PAGEDOWN, KEY_HOME, KEY_END,
+		KEY_ENTER, KEY_BACKSPACE,
+		KEY_J, KEY_K, KEY_H, KEY_L,
+		KEY_SPACE, KEY_TAB
+	};
 	size_t i;
 
-	for (i = 0; i < sizeof(page_keys) / sizeof(page_keys[0]); i++)
-		if (page_keys[i] == code)
+	for (i = 0; i < sizeof(keys) / sizeof(*keys); i++)
+		if (keys[i] == code)
 			return 1;
 	return 0;
 }
 
 static int
-overlay_active(void)
+overlayactive(void)
 {
 	char path[64];
 	FILE *fp;
 	pid_t pid;
-	int active = 0;
+	int active;
 
-	snprintf(path, sizeof(path), PID_FMT, (unsigned int)getuid());
+	active = 0;
+	snprintf(path, sizeof(path), PIDFMT, (unsigned int)getuid());
 	if (!(fp = fopen(path, "r")))
 		return 0;
-	if (fscanf(fp, "%d", &pid) == 1)
-		active = (kill(pid, 0) == 0);
+	if (fscanf(fp, "%d", &pid) == 1 && pid > 0)
+		active = !kill(pid, 0);
 	fclose(fp);
 	return active;
 }
 
 static void
-set_timer(int tfd, int ms)
+settimer(int tfd, int ms)
 {
 	struct itimerspec its;
 
@@ -85,18 +73,19 @@ set_timer(int tfd, int ms)
 }
 
 static void
-sig_handler(int sig)
+sighandler(int sig)
 {
 	(void)sig;
 	running = 0;
 }
 
 static void
-spawn_translate(void)
+spawntranslate(void)
 {
+	pid_t pid;
 	int fd;
 
-	if (fork() != 0)
+	if ((pid = fork()) != 0)
 		return;
 	if ((fd = open("/dev/null", O_RDWR)) >= 0) {
 		dup2(fd, STDIN_FILENO);
@@ -115,22 +104,21 @@ main(void)
 	struct pollfd pfds[2];
 	struct input_event ev;
 	uint64_t exp;
-	int kfd;
-	int tfd;
+	int kfd, tfd;
 
 	memset(&sa, 0, sizeof(sa));
-	sa.sa_handler = sig_handler;
+	sa.sa_handler = sighandler;
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGINT, &sa, NULL);
 	signal(SIGCHLD, SIG_IGN);
 
-	if ((kfd = open(KBD_DEV, O_RDONLY | O_NONBLOCK)) < 0)
-		eprintf("failed to open keyboard device: %s\n", strerror(errno));
+	if ((kfd = open(KBDDEV, O_RDONLY | O_NONBLOCK)) < 0)
+		err(1, "open %s", KBDDEV);
 
 	if ((tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC)) < 0) {
 		close(kfd);
-		eprintf("failed to create timerfd: %s\n", strerror(errno));
+		err(1, "timerfd_create");
 	}
 
 	pfds[0].fd = kfd;
@@ -151,23 +139,23 @@ main(void)
 					continue;
 
 				if (ev.code == KEY_ESC) {
-					set_timer(tfd, 0);
+					settimer(tfd, 0);
 					continue;
 				}
 
-				if (!is_page_turn_key(ev.code))
+				if (!ispageturnkey(ev.code))
 					continue;
 
-				if ((ev.code == KEY_SPACE || ev.code == KEY_TAB) && overlay_active())
+				if ((ev.code == KEY_SPACE || ev.code == KEY_TAB) && overlayactive())
 					continue;
 
-				set_timer(tfd, 100);
+				settimer(tfd, 100);
 			}
 		}
 
 		if (pfds[1].revents & POLLIN) {
 			if (read(tfd, &exp, sizeof(exp)) > 0)
-				spawn_translate();
+				spawntranslate();
 		}
 	}
 
