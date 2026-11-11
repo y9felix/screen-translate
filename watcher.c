@@ -57,7 +57,7 @@ overlayactive(void)
 	if (!(fp = fopen(path, "r")))
 		return 0;
 	if (fscanf(fp, "%d", &pid) == 1 && pid > 0)
-		active = kill(pid, 0) == 0;
+		active = !kill(pid, 0);
 	fclose(fp);
 	return active;
 }

@@ -187,7 +187,11 @@ createshmbuffer(int width, int height, struct buffer *buf)
 	data = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (data == MAP_FAILED)
 		goto closefd;
-	pool = wl_shm_create_pool(shm, fd, sz);
+	if (!(pool = wl_shm_create_pool(shm, fd, sz))) {
+		munmap(data, sz);
+		close(fd);
+		return -1;
+	}
 	wlbuf = wl_shm_pool_create_buffer(pool, 0, width, height, width * 4,
 	    WL_SHM_FORMAT_ARGB8888);
 	wl_shm_pool_destroy(pool);
@@ -280,10 +284,14 @@ kbkeymap(void *data, struct wl_keyboard *kb, uint32_t format,
 		close(fd);
 		return;
 	}
-	if (xkbst)
+	if (xkbst) {
 		xkb_state_unref(xkbst);
-	if (xkbmap)
+		xkbst = NULL;
+	}
+	if (xkbmap) {
 		xkb_keymap_unref(xkbmap);
+		xkbmap = NULL;
+	}
 	xkbmap = xkb_keymap_new_from_string(xkbctx, mapstr,
 	    XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
 	munmap(mapstr, size);
@@ -367,6 +375,8 @@ lsconfigure(void *data, struct zwlr_layer_surface_v1 *ls,
 {
 	(void)data;
 	zwlr_layer_surface_v1_ack_configure(ls, serial);
+	if (!width || !height)
+		return;
 	if (winwidth != (int)width || winheight != (int)height || !winbuf.wlbuf) {
 		winwidth = (int)width;
 		winheight = (int)height;
@@ -473,7 +483,7 @@ render(void)
 	double x;
 	int h, w;
 
-	if (!configured || !winbuf.data)
+	if (!configured || !winbuf.data || !surface)
 		return;
 
 	target = cairo_image_surface_create_for_data(
@@ -562,6 +572,8 @@ sighandler(int sig)
 static void
 unmapsurface(void)
 {
+	if (!layersurface && !surface)
+		return;
 	if (layersurface) {
 		zwlr_layer_surface_v1_destroy(layersurface);
 		layersurface = NULL;
