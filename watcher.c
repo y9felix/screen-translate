@@ -21,7 +21,9 @@ static int overlayactive(void);
 static void settimer(int tfd, int ms);
 static void sighandler(int sig);
 static void spawntranslate(void);
+static void usage(void);
 
+static char *argv0;
 static volatile sig_atomic_t running = 1;
 
 static int
@@ -49,14 +51,13 @@ overlayactive(void)
 	char path[64];
 	FILE *fp;
 	pid_t pid;
-	int active;
+	int active = 0;
 
-	active = 0;
 	snprintf(path, sizeof(path), PIDFMT, (unsigned int)getuid());
 	if (!(fp = fopen(path, "r")))
 		return 0;
 	if (fscanf(fp, "%d", &pid) == 1 && pid > 0)
-		active = !kill(pid, 0);
+		active = kill(pid, 0) == 0;
 	fclose(fp);
 	return active;
 }
@@ -91,30 +92,49 @@ spawntranslate(void)
 		dup2(fd, STDIN_FILENO);
 		dup2(fd, STDOUT_FILENO);
 		dup2(fd, STDERR_FILENO);
-		close(fd);
+		if (fd > STDERR_FILENO)
+			close(fd);
 	}
 	execl("/usr/local/bin/screen-translate", "screen-translate", (char *)NULL);
 	_exit(1);
 }
 
+static void
+usage(void)
+{
+	fprintf(stderr, "usage: %s\n", argv0);
+	exit(1);
+}
+
 int
-main(void)
+main(int argc, char *argv[])
 {
 	struct sigaction sa;
 	struct pollfd pfds[2];
 	struct input_event ev;
 	uint64_t exp;
-	int kfd, tfd;
+	int ch, kfd, tfd;
+
+	argv0 = argv[0];
+	while ((ch = getopt(argc, argv, "h")) != -1) {
+		switch (ch) {
+		default:
+			usage();
+		}
+	}
+	if (argc > optind)
+		usage();
 
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = sighandler;
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGINT, &sa, NULL);
-	signal(SIGCHLD, SIG_IGN);
+	sa.sa_handler = SIG_IGN;
+	sigaction(SIGCHLD, &sa, NULL);
 
-	if ((kfd = open(KBDDEV, O_RDONLY | O_NONBLOCK)) < 0)
-		err(1, "open %s", KBDDEV);
+	if ((kfd = open(KBDDEV, O_RDONLY | O_NONBLOCK | O_CLOEXEC)) < 0)
+		err(1, "%s", KBDDEV);
 
 	if ((tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC)) < 0) {
 		close(kfd);

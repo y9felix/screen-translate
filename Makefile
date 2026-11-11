@@ -1,7 +1,7 @@
 PROG = screen-translate-overlay
 WATCHER = screen-translate-watcher
 PREFIX = /usr/local
-CC = gcc
+CC ?= gcc
 WAYLAND_SCANNER = wayland-scanner
 
 PKGS = wayland-client cairo xkbcommon

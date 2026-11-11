@@ -26,6 +26,7 @@ struct buffer {
 	size_t size;
 };
 
+static void cleanup(void);
 static int createshmbuffer(int width, int height, struct buffer *buf);
 static void destroyshmbuffer(struct buffer *buf);
 static void kbenter(void *data, struct wl_keyboard *kb, uint32_t serial,
@@ -38,7 +39,8 @@ static void kbleave(void *data, struct wl_keyboard *kb, uint32_t serial,
     struct wl_surface *surf);
 static void kbmodifiers(void *data, struct wl_keyboard *kb, uint32_t serial,
     uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group);
-static void kbrepeatinfo(void *data, struct wl_keyboard *kb, int32_t rate, int32_t delay);
+static void kbrepeatinfo(void *data, struct wl_keyboard *kb, int32_t rate,
+    int32_t delay);
 static cairo_surface_t *loadpng(const char *path);
 static void loadimages(void);
 static void lsclosed(void *data, struct zwlr_layer_surface_v1 *ls);
@@ -131,10 +133,49 @@ static const struct wl_registry_listener reglistener = {
 	.global_remove = regglobalremove,
 };
 
+static void
+cleanup(void)
+{
+	destroyshmbuffer(&winbuf);
+	if (origsurf)
+		cairo_surface_destroy(origsurf);
+	if (transsurf)
+		cairo_surface_destroy(transsurf);
+	if (vk)
+		zwp_virtual_keyboard_v1_destroy(vk);
+	if (vkmgr)
+		zwp_virtual_keyboard_manager_v1_destroy(vkmgr);
+	if (keyboard)
+		wl_keyboard_destroy(keyboard);
+	if (pointer)
+		wl_pointer_destroy(pointer);
+	if (seat)
+		wl_seat_destroy(seat);
+	unmapsurface();
+	if (layershell)
+		zwlr_layer_shell_v1_destroy(layershell);
+	if (shm)
+		wl_shm_destroy(shm);
+	if (compositor)
+		wl_compositor_destroy(compositor);
+	if (registry)
+		wl_registry_destroy(registry);
+	if (xkbst)
+		xkb_state_unref(xkbst);
+	if (xkbmap)
+		xkb_keymap_unref(xkbmap);
+	if (xkbctx)
+		xkb_context_unref(xkbctx);
+	if (display)
+		wl_display_disconnect(display);
+}
+
 static int
 createshmbuffer(int width, int height, struct buffer *buf)
 {
 	struct wl_shm_pool *pool;
+	struct wl_buffer *wlbuf;
+	void *data;
 	size_t sz;
 	int fd;
 
@@ -143,14 +184,20 @@ createshmbuffer(int width, int height, struct buffer *buf)
 		return -1;
 	if (ftruncate(fd, sz) < 0)
 		goto closefd;
-	buf->data = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (buf->data == MAP_FAILED)
+	data = mmap(NULL, sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (data == MAP_FAILED)
 		goto closefd;
 	pool = wl_shm_create_pool(shm, fd, sz);
-	buf->wlbuf = wl_shm_pool_create_buffer(pool, 0, width, height, width * 4,
+	wlbuf = wl_shm_pool_create_buffer(pool, 0, width, height, width * 4,
 	    WL_SHM_FORMAT_ARGB8888);
 	wl_shm_pool_destroy(pool);
 	close(fd);
+	if (!wlbuf) {
+		munmap(data, sz);
+		return -1;
+	}
+	buf->data = data;
+	buf->wlbuf = wlbuf;
 	buf->size = sz;
 	return 0;
 
@@ -465,6 +512,7 @@ render(void)
 		cairo_show_text(cr, "Translating...");
 	}
 
+	cairo_surface_flush(target);
 	cairo_destroy(cr);
 	cairo_surface_destroy(target);
 
@@ -529,7 +577,7 @@ unmapsurface(void)
 static void
 usage(void)
 {
-	fprintf(stderr, "usage: %s <orig.png> [trans.png]\n", argv0);
+	fprintf(stderr, "usage: %s orig.png [trans.png]\n", argv0);
 	exit(1);
 }
 
@@ -538,15 +586,26 @@ main(int argc, char *argv[])
 {
 	struct sigaction sa;
 	struct pollfd pfd;
-	int ret;
+	int ch, ret;
 
 	argv0 = argv[0];
-	if (argc < 2 || !strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))
+	while ((ch = getopt(argc, argv, "h")) != -1) {
+		switch (ch) {
+		default:
+			usage();
+		}
+	}
+	argc -= optind;
+	argv += optind;
+	if (!argc)
 		usage();
 
-	origpath = argv[1];
-	if (argc >= 3)
-		transpath = argv[2];
+	origpath = argv[0];
+	if (argc > 1)
+		transpath = argv[1];
+
+	if (!(display = wl_display_connect(NULL)))
+		errx(1, "wl_display_connect failed");
 
 	if (!(xkbctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS)))
 		errx(1, "xkb_context_new failed");
@@ -557,9 +616,6 @@ main(int argc, char *argv[])
 	sigaction(SIGUSR1, &sa, NULL);
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGINT, &sa, NULL);
-
-	if (!(display = wl_display_connect(NULL)))
-		errx(1, "wl_display_connect failed");
 
 	registry = wl_display_get_registry(display);
 	wl_registry_add_listener(registry, &reglistener, NULL);
@@ -613,15 +669,12 @@ main(int argc, char *argv[])
 		pfd.revents = 0;
 		ret = poll(&pfd, 1, 100);
 		if (ret > 0) {
-			if (wl_display_read_events(display) < 0)
+			if (wl_display_read_events(display) < 0 ||
+			    wl_display_dispatch_pending(display) < 0)
 				break;
-			if (wl_display_dispatch_pending(display) < 0)
-				break;
-		} else if (ret == 0) {
-			wl_display_cancel_read(display);
 		} else {
 			wl_display_cancel_read(display);
-			if (errno != EINTR)
+			if (ret < 0 && errno != EINTR)
 				break;
 		}
 
@@ -632,37 +685,6 @@ main(int argc, char *argv[])
 		}
 	}
 
-	destroyshmbuffer(&winbuf);
-	if (origsurf)
-		cairo_surface_destroy(origsurf);
-	if (transsurf)
-		cairo_surface_destroy(transsurf);
-	if (vk)
-		zwp_virtual_keyboard_v1_destroy(vk);
-	if (vkmgr)
-		zwp_virtual_keyboard_manager_v1_destroy(vkmgr);
-	if (keyboard)
-		wl_keyboard_destroy(keyboard);
-	if (pointer)
-		wl_pointer_destroy(pointer);
-	if (seat)
-		wl_seat_destroy(seat);
-	unmapsurface();
-	if (layershell)
-		zwlr_layer_shell_v1_destroy(layershell);
-	if (shm)
-		wl_shm_destroy(shm);
-	if (compositor)
-		wl_compositor_destroy(compositor);
-	if (registry)
-		wl_registry_destroy(registry);
-	if (xkbst)
-		xkb_state_unref(xkbst);
-	if (xkbmap)
-		xkb_keymap_unref(xkbmap);
-	if (xkbctx)
-		xkb_context_unref(xkbctx);
-	wl_display_disconnect(display);
-
+	cleanup();
 	return 0;
 }
