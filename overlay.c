@@ -29,35 +29,22 @@ struct buffer {
 static void cleanup(void);
 static int createshmbuffer(int width, int height, struct buffer *buf);
 static void destroyshmbuffer(struct buffer *buf);
-static void kbenter(void *data, struct wl_keyboard *kb, uint32_t serial,
-    struct wl_surface *surf, struct wl_array *keys);
-static void kbkey(void *data, struct wl_keyboard *kb, uint32_t serial,
-    uint32_t time, uint32_t key, uint32_t state);
-static void kbkeymap(void *data, struct wl_keyboard *kb, uint32_t format,
-    int32_t fd, uint32_t size);
-static void kbleave(void *data, struct wl_keyboard *kb, uint32_t serial,
-    struct wl_surface *surf);
-static void kbmodifiers(void *data, struct wl_keyboard *kb, uint32_t serial,
-    uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group);
-static void kbrepeatinfo(void *data, struct wl_keyboard *kb, int32_t rate,
-    int32_t delay);
+static void kbenter(void *data, struct wl_keyboard *kb, uint32_t serial, struct wl_surface *surf, struct wl_array *keys);
+static void kbkey(void *data, struct wl_keyboard *kb, uint32_t serial, uint32_t time, uint32_t key, uint32_t state);
+static void kbkeymap(void *data, struct wl_keyboard *kb, uint32_t format, int32_t fd, uint32_t size);
+static void kbleave(void *data, struct wl_keyboard *kb, uint32_t serial, struct wl_surface *surf);
+static void kbmodifiers(void *data, struct wl_keyboard *kb, uint32_t serial, uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group);
+static void kbrepeatinfo(void *data, struct wl_keyboard *kb, int32_t rate, int32_t delay);
 static cairo_surface_t *loadpng(const char *path);
 static void loadimages(void);
 static void lsclosed(void *data, struct zwlr_layer_surface_v1 *ls);
-static void lsconfigure(void *data, struct zwlr_layer_surface_v1 *ls,
-    uint32_t serial, uint32_t width, uint32_t height);
-static void ptraxis(void *data, struct wl_pointer *pt, uint32_t time,
-    uint32_t axis, wl_fixed_t val);
-static void ptrbutton(void *data, struct wl_pointer *pt, uint32_t serial,
-    uint32_t time, uint32_t button, uint32_t state);
-static void ptrenter(void *data, struct wl_pointer *pt, uint32_t serial,
-    struct wl_surface *surf, wl_fixed_t sx, wl_fixed_t sy);
-static void ptrleave(void *data, struct wl_pointer *pt, uint32_t serial,
-    struct wl_surface *surf);
-static void ptrmotion(void *data, struct wl_pointer *pt, uint32_t time,
-    wl_fixed_t sx, wl_fixed_t sy);
-static void regglobal(void *data, struct wl_registry *reg, uint32_t name,
-    const char *iface, uint32_t version);
+static void lsconfigure(void *data, struct zwlr_layer_surface_v1 *ls, uint32_t serial, uint32_t width, uint32_t height);
+static void ptraxis(void *data, struct wl_pointer *pt, uint32_t time, uint32_t axis, wl_fixed_t val);
+static void ptrbutton(void *data, struct wl_pointer *pt, uint32_t serial, uint32_t time, uint32_t button, uint32_t state);
+static void ptrenter(void *data, struct wl_pointer *pt, uint32_t serial, struct wl_surface *surf, wl_fixed_t sx, wl_fixed_t sy);
+static void ptrleave(void *data, struct wl_pointer *pt, uint32_t serial, struct wl_surface *surf);
+static void ptrmotion(void *data, struct wl_pointer *pt, uint32_t time, wl_fixed_t sx, wl_fixed_t sy);
+static void regglobal(void *data, struct wl_registry *reg, uint32_t name, const char *iface, uint32_t version);
 static void regglobalremove(void *data, struct wl_registry *reg, uint32_t name);
 static void render(void);
 static void seatcapabilities(void *data, struct wl_seat *s, uint32_t caps);
@@ -192,8 +179,7 @@ createshmbuffer(int width, int height, struct buffer *buf)
 		close(fd);
 		return -1;
 	}
-	wlbuf = wl_shm_pool_create_buffer(pool, 0, width, height, width * 4,
-	    WL_SHM_FORMAT_ARGB8888);
+	wlbuf = wl_shm_pool_create_buffer(pool, 0, width, height, width * 4, WL_SHM_FORMAT_ARGB8888);
 	wl_shm_pool_destroy(pool);
 	close(fd);
 	if (!wlbuf) {
@@ -225,8 +211,7 @@ destroyshmbuffer(struct buffer *buf)
 }
 
 static void
-kbenter(void *data, struct wl_keyboard *kb, uint32_t serial,
-    struct wl_surface *surf, struct wl_array *keys)
+kbenter(void *data, struct wl_keyboard *kb, uint32_t serial, struct wl_surface *surf, struct wl_array *keys)
 {
 	(void)data;
 	(void)kb;
@@ -236,8 +221,7 @@ kbenter(void *data, struct wl_keyboard *kb, uint32_t serial,
 }
 
 static void
-kbkey(void *data, struct wl_keyboard *kb, uint32_t serial,
-    uint32_t time, uint32_t key, uint32_t state)
+kbkey(void *data, struct wl_keyboard *kb, uint32_t serial, uint32_t time, uint32_t key, uint32_t state)
 {
 	xkb_keysym_t sym;
 
@@ -264,8 +248,7 @@ kbkey(void *data, struct wl_keyboard *kb, uint32_t serial,
 }
 
 static void
-kbkeymap(void *data, struct wl_keyboard *kb, uint32_t format,
-    int32_t fd, uint32_t size)
+kbkeymap(void *data, struct wl_keyboard *kb, uint32_t format, int32_t fd, uint32_t size)
 {
 	char *mapstr;
 
@@ -292,8 +275,7 @@ kbkeymap(void *data, struct wl_keyboard *kb, uint32_t format,
 		xkb_keymap_unref(xkbmap);
 		xkbmap = NULL;
 	}
-	xkbmap = xkb_keymap_new_from_string(xkbctx, mapstr,
-	    XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
+	xkbmap = xkb_keymap_new_from_string(xkbctx, mapstr, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
 	munmap(mapstr, size);
 	close(fd);
 	if (xkbmap)
@@ -301,8 +283,7 @@ kbkeymap(void *data, struct wl_keyboard *kb, uint32_t format,
 }
 
 static void
-kbleave(void *data, struct wl_keyboard *kb, uint32_t serial,
-    struct wl_surface *surf)
+kbleave(void *data, struct wl_keyboard *kb, uint32_t serial, struct wl_surface *surf)
 {
 	(void)data;
 	(void)kb;
@@ -311,8 +292,7 @@ kbleave(void *data, struct wl_keyboard *kb, uint32_t serial,
 }
 
 static void
-kbmodifiers(void *data, struct wl_keyboard *kb, uint32_t serial,
-    uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group)
+kbmodifiers(void *data, struct wl_keyboard *kb, uint32_t serial, uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group)
 {
 	(void)data;
 	(void)kb;
@@ -370,8 +350,7 @@ lsclosed(void *data, struct zwlr_layer_surface_v1 *ls)
 }
 
 static void
-lsconfigure(void *data, struct zwlr_layer_surface_v1 *ls,
-    uint32_t serial, uint32_t width, uint32_t height)
+lsconfigure(void *data, struct zwlr_layer_surface_v1 *ls, uint32_t serial, uint32_t width, uint32_t height)
 {
 	(void)data;
 	zwlr_layer_surface_v1_ack_configure(ls, serial);
@@ -389,8 +368,7 @@ lsconfigure(void *data, struct zwlr_layer_surface_v1 *ls,
 }
 
 static void
-ptraxis(void *data, struct wl_pointer *pt, uint32_t time,
-    uint32_t axis, wl_fixed_t val)
+ptraxis(void *data, struct wl_pointer *pt, uint32_t time, uint32_t axis, wl_fixed_t val)
 {
 	(void)data;
 	(void)pt;
@@ -400,8 +378,7 @@ ptraxis(void *data, struct wl_pointer *pt, uint32_t time,
 }
 
 static void
-ptrbutton(void *data, struct wl_pointer *pt, uint32_t serial,
-    uint32_t time, uint32_t button, uint32_t state)
+ptrbutton(void *data, struct wl_pointer *pt, uint32_t serial, uint32_t time, uint32_t button, uint32_t state)
 {
 	(void)data;
 	(void)pt;
@@ -415,8 +392,7 @@ ptrbutton(void *data, struct wl_pointer *pt, uint32_t serial,
 }
 
 static void
-ptrenter(void *data, struct wl_pointer *pt, uint32_t serial,
-    struct wl_surface *surf, wl_fixed_t sx, wl_fixed_t sy)
+ptrenter(void *data, struct wl_pointer *pt, uint32_t serial, struct wl_surface *surf, wl_fixed_t sx, wl_fixed_t sy)
 {
 	(void)data;
 	(void)pt;
@@ -427,8 +403,7 @@ ptrenter(void *data, struct wl_pointer *pt, uint32_t serial,
 }
 
 static void
-ptrleave(void *data, struct wl_pointer *pt, uint32_t serial,
-    struct wl_surface *surf)
+ptrleave(void *data, struct wl_pointer *pt, uint32_t serial, struct wl_surface *surf)
 {
 	(void)data;
 	(void)pt;
@@ -437,8 +412,7 @@ ptrleave(void *data, struct wl_pointer *pt, uint32_t serial,
 }
 
 static void
-ptrmotion(void *data, struct wl_pointer *pt, uint32_t time,
-    wl_fixed_t sx, wl_fixed_t sy)
+ptrmotion(void *data, struct wl_pointer *pt, uint32_t time, wl_fixed_t sx, wl_fixed_t sy)
 {
 	(void)data;
 	(void)pt;
@@ -448,8 +422,7 @@ ptrmotion(void *data, struct wl_pointer *pt, uint32_t time,
 }
 
 static void
-regglobal(void *data, struct wl_registry *reg, uint32_t name,
-    const char *iface, uint32_t version)
+regglobal(void *data, struct wl_registry *reg, uint32_t name, const char *iface, uint32_t version)
 {
 	(void)data;
 	(void)version;
@@ -486,9 +459,7 @@ render(void)
 	if (!configured || !winbuf.data || !surface)
 		return;
 
-	target = cairo_image_surface_create_for_data(
-	    (unsigned char *)winbuf.data, CAIRO_FORMAT_ARGB32,
-	    winwidth, winheight, winwidth * 4);
+	target = cairo_image_surface_create_for_data((unsigned char *)winbuf.data, CAIRO_FORMAT_ARGB32, winwidth, winheight, winwidth * 4);
 	cr = cairo_create(target);
 
 	cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
@@ -500,8 +471,7 @@ render(void)
 		h = cairo_image_surface_get_height(src);
 		if (w > 0 && h > 0) {
 			cairo_save(cr);
-			cairo_scale(cr, (double)winwidth / (double)w,
-			    (double)winheight / (double)h);
+			cairo_scale(cr, (double)winwidth / (double)w, (double)winheight / (double)h);
 			cairo_set_source_surface(cr, src, 0.0, 0.0);
 			cairo_paint(cr);
 			cairo_restore(cr);
@@ -514,8 +484,7 @@ render(void)
 		cairo_rectangle(cr, x, 24.0, 200.0, 40.0);
 		cairo_fill(cr);
 
-		cairo_select_font_face(cr, "sans-serif", CAIRO_FONT_SLANT_NORMAL,
-		    CAIRO_FONT_WEIGHT_BOLD);
+		cairo_select_font_face(cr, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
 		cairo_set_font_size(cr, 16.0);
 		cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
 		cairo_move_to(cr, x + 45.0, 49.0);
@@ -642,19 +611,13 @@ main(int argc, char *argv[])
 	if (!(surface = wl_compositor_create_surface(compositor)))
 		errx(1, "wl_compositor_create_surface failed");
 
-	layersurface = zwlr_layer_shell_v1_get_layer_surface(layershell,
-	    surface, NULL, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "screen-translate");
+	layersurface = zwlr_layer_shell_v1_get_layer_surface(layershell, surface, NULL, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "screen-translate");
 	if (!layersurface)
 		errx(1, "zwlr_layer_shell_v1_get_layer_surface failed");
 
-	zwlr_layer_surface_v1_set_anchor(layersurface,
-	    ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
-	    ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
-	    ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
-	    ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
+	zwlr_layer_surface_v1_set_anchor(layersurface, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
 	zwlr_layer_surface_v1_set_exclusive_zone(layersurface, -1);
-	zwlr_layer_surface_v1_set_keyboard_interactivity(layersurface,
-	    ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE);
+	zwlr_layer_surface_v1_set_keyboard_interactivity(layersurface, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE);
 	zwlr_layer_surface_v1_add_listener(layersurface, &layerlistener, NULL);
 
 	wl_surface_commit(surface);
@@ -681,8 +644,7 @@ main(int argc, char *argv[])
 		pfd.revents = 0;
 		ret = poll(&pfd, 1, 100);
 		if (ret > 0) {
-			if (wl_display_read_events(display) < 0 ||
-			    wl_display_dispatch_pending(display) < 0)
+			if (wl_display_read_events(display) < 0 || wl_display_dispatch_pending(display) < 0)
 				break;
 		} else {
 			wl_display_cancel_read(display);
