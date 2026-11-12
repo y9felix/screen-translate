@@ -160,13 +160,11 @@ load_png(const char *path)
 }
 
 static void
-load_images(const char *orig_path, const char *trans_path)
+load_trans(const char *path)
 {
 	cairo_surface_t *s;
 
-	if (!orig_surf)
-		orig_surf = load_png(orig_path);
-	if ((s = load_png(trans_path))) {
+	if ((s = load_png(path))) {
 		if (trans_surf)
 			cairo_surface_destroy(trans_surf);
 		trans_surf = s;
@@ -316,7 +314,6 @@ kb_enter(void *data, struct wl_keyboard *kb, uint32_t serial, struct wl_surface 
 static void
 kb_keymap(void *data, struct wl_keyboard *kb, uint32_t format, int32_t fd, uint32_t size)
 {
-	static int vk_keymap_set;
 	char *mapstr;
 
 	(void)data;
@@ -325,10 +322,8 @@ kb_keymap(void *data, struct wl_keyboard *kb, uint32_t format, int32_t fd, uint3
 		close(fd);
 		return;
 	}
-	if (vk && !vk_keymap_set) {
-		vk_keymap_set = 1;
+	if (vk)
 		zwp_virtual_keyboard_v1_keymap(vk, format, fd, size);
-	}
 	mapstr = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
 	if (mapstr == MAP_FAILED) {
 		close(fd);
@@ -407,6 +402,7 @@ kb_key(void *data, struct wl_keyboard *kb, uint32_t serial, uint32_t time, uint3
 static void
 cleanup(void)
 {
+	unmap_surface();
 	destroy_shm_buffer(&win_buf);
 	if (orig_surf)
 		cairo_surface_destroy(orig_surf);
@@ -422,7 +418,6 @@ cleanup(void)
 		wl_pointer_destroy(pointer);
 	if (seat)
 		wl_seat_destroy(seat);
-	unmap_surface();
 	if (layer_shell)
 		zwlr_layer_shell_v1_destroy(layer_shell);
 	if (shm)
@@ -543,11 +538,16 @@ main(int argc, char *argv[])
 	}
 	argc -= optind;
 	argv += optind;
-	if (!argc)
+	if (!argc || argc > 2)
 		usage();
 
 	orig_path = argv[0];
 	trans_path = (argc > 1) ? argv[1] : NULL;
+
+	if (!(orig_surf = load_png(orig_path)))
+		errx(1, "failed to load %s", orig_path);
+	if (trans_path)
+		load_trans(trans_path);
 
 	if (!(display = wl_display_connect(NULL)))
 		errx(1, "wl_display_connect failed");
@@ -585,7 +585,6 @@ main(int argc, char *argv[])
 	zwlr_layer_surface_v1_add_listener(layer_surface, &layer_listener, NULL);
 
 	wl_surface_commit(surface);
-	load_images(orig_path, trans_path);
 
 	pfd.fd = wl_display_get_fd(display);
 	pfd.events = POLLIN;
@@ -618,7 +617,7 @@ main(int argc, char *argv[])
 
 		if (reload_requested) {
 			reload_requested = 0;
-			load_images(orig_path, trans_path);
+			load_trans(trans_path);
 			render();
 		}
 	}

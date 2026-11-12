@@ -149,6 +149,11 @@ main(int argc, char *argv[])
 			break;
 		}
 
+		if (pfds[0].revents & (POLLERR | POLLHUP | POLLNVAL))
+			break;
+		if (pfds[1].revents & (POLLERR | POLLNVAL))
+			break;
+
 		if (pfds[0].revents & POLLIN) {
 			while (read(kfd, &ev, sizeof(ev)) == (ssize_t)sizeof(ev)) {
 				if (ev.type != EV_KEY || ev.value != 1)
