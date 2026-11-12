@@ -1,12 +1,12 @@
 PROG = screen-translate-overlay
 WATCHER = screen-translate-watcher
 PREFIX = /usr/local
-CC ?= gcc
+CC ?= cc
 WAYLAND_SCANNER = wayland-scanner
 
 PKGS = wayland-client cairo xkbcommon
 CPPFLAGS = $(shell pkg-config --cflags $(PKGS))
-CFLAGS = -std=c99 -pedantic -Wall -Wextra -O2
+CFLAGS = -std=c99 -pedantic -Wall -Wextra -Werror -O2
 LDFLAGS = $(shell pkg-config --libs $(PKGS)) -lm
 
 LAYER_XML = protocols/wlr-layer-shell-unstable-v1.xml
@@ -17,7 +17,6 @@ VKBD_XML = protocols/virtual-keyboard-unstable-v1.xml
 VKBD_H = virtual-keyboard-unstable-v1-client-protocol.h
 VKBD_C = virtual-keyboard-unstable-v1-protocol.c
 
-SRC = overlay.c $(LAYER_C) $(VKBD_C)
 OBJ = overlay.o $(LAYER_C:.c=.o) $(VKBD_C:.c=.o)
 
 all: $(PROG) $(WATCHER)

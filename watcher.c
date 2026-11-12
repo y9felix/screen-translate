@@ -16,18 +16,11 @@
 #define KBDDEV "/dev/input/by-path/platform-i8042-serio-0-event-kbd"
 #define PIDFMT "/run/user/%u/screen-translate-overlay.pid"
 
-static int ispageturnkey(uint16_t code);
-static int overlayactive(void);
-static void settimer(int tfd, int ms);
-static void sighandler(int sig);
-static void spawntranslate(void);
-static void usage(void);
-
 static char *argv0;
 static volatile sig_atomic_t running = 1;
 
 static int
-ispageturnkey(uint16_t code)
+is_page_turn_key(uint16_t code)
 {
 	static const uint16_t keys[] = {
 		KEY_W, KEY_A, KEY_S, KEY_D,
@@ -39,14 +32,15 @@ ispageturnkey(uint16_t code)
 	};
 	size_t i;
 
-	for (i = 0; i < sizeof(keys) / sizeof(*keys); i++)
+	for (i = 0; i < sizeof(keys) / sizeof(*keys); i++) {
 		if (keys[i] == code)
 			return 1;
+	}
 	return 0;
 }
 
 static int
-overlayactive(void)
+overlay_active(void)
 {
 	char path[64];
 	FILE *fp;
@@ -56,14 +50,14 @@ overlayactive(void)
 	snprintf(path, sizeof(path), PIDFMT, (unsigned int)getuid());
 	if (!(fp = fopen(path, "r")))
 		return 0;
-	if (fscanf(fp, "%d", &pid) == 1 && pid > 0)
-		active = !kill(pid, 0);
+	if (fscanf(fp, "%d", &pid) == 1 && pid > 0 && kill(pid, 0) >= 0)
+		active = 1;
 	fclose(fp);
 	return active;
 }
 
 static void
-settimer(int tfd, int ms)
+set_timer(int tfd, int ms)
 {
 	struct itimerspec its;
 
@@ -74,19 +68,21 @@ settimer(int tfd, int ms)
 }
 
 static void
-sighandler(int sig)
+sig_handler(int sig)
 {
 	(void)sig;
 	running = 0;
 }
 
 static void
-spawntranslate(void)
+spawn_translate(void)
 {
 	pid_t pid;
 	int fd;
 
-	if ((pid = fork()) != 0)
+	if ((pid = fork()) < 0)
+		return;
+	if (pid)
 		return;
 	if ((fd = open("/dev/null", O_RDWR)) >= 0) {
 		dup2(fd, STDIN_FILENO);
@@ -116,7 +112,7 @@ main(int argc, char *argv[])
 	int ch, kfd, tfd;
 
 	argv0 = argv[0];
-	while ((ch = getopt(argc, argv, "h")) != -1) {
+	while ((ch = getopt(argc, argv, "h")) >= 0) {
 		switch (ch) {
 		default:
 			usage();
@@ -126,7 +122,7 @@ main(int argc, char *argv[])
 		usage();
 
 	memset(&sa, 0, sizeof(sa));
-	sa.sa_handler = sighandler;
+	sa.sa_handler = sig_handler;
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGINT, &sa, NULL);
@@ -159,23 +155,23 @@ main(int argc, char *argv[])
 					continue;
 
 				if (ev.code == KEY_ESC) {
-					settimer(tfd, 0);
+					set_timer(tfd, 0);
 					continue;
 				}
 
-				if (!ispageturnkey(ev.code))
+				if (!is_page_turn_key(ev.code))
 					continue;
 
-				if ((ev.code == KEY_SPACE || ev.code == KEY_TAB) && overlayactive())
+				if ((ev.code == KEY_SPACE || ev.code == KEY_TAB) && overlay_active())
 					continue;
 
-				settimer(tfd, 100);
+				set_timer(tfd, 100);
 			}
 		}
 
 		if (pfds[1].revents & POLLIN) {
 			if (read(tfd, &exp, sizeof(exp)) > 0)
-				spawntranslate();
+				spawn_translate();
 		}
 	}
 
