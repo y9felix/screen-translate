@@ -314,6 +314,7 @@ kb_enter(void *data, struct wl_keyboard *kb, uint32_t serial, struct wl_surface 
 static void
 kb_keymap(void *data, struct wl_keyboard *kb, uint32_t format, int32_t fd, uint32_t size)
 {
+	static int vk_keymap_set;
 	char *mapstr;
 
 	(void)data;
@@ -322,8 +323,10 @@ kb_keymap(void *data, struct wl_keyboard *kb, uint32_t format, int32_t fd, uint3
 		close(fd);
 		return;
 	}
-	if (vk)
+	if (vk && !vk_keymap_set) {
+		vk_keymap_set = 1;
 		zwp_virtual_keyboard_v1_keymap(vk, format, fd, size);
+	}
 	mapstr = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
 	if (mapstr == MAP_FAILED) {
 		close(fd);
