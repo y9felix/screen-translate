@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ "${1:-}" = "-v" ] || [ "${1:-}" = "--version" ]; then
+    echo "screen-translate 1.0.1"
+    exit 0
+fi
+
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     echo "usage: screen-translate [-s|--select] [-m|--mode]"
     exit 0

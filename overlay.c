@@ -20,6 +20,10 @@
 
 #define SHMNAME "screen-translate-shm"
 
+#ifndef VERSION
+#define VERSION "1.0.1"
+#endif
+
 struct buffer {
 	struct wl_buffer *wlbuf;
 	void *data;
@@ -533,8 +537,11 @@ main(int argc, char *argv[])
 	int ch, ret;
 
 	argv0 = argv[0];
-	while ((ch = getopt(argc, argv, "h")) >= 0) {
+	while ((ch = getopt(argc, argv, "hv")) >= 0) {
 		switch (ch) {
+		case 'v':
+			puts("screen-translate-overlay-" VERSION);
+			return 0;
 		default:
 			usage();
 		}

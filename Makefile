@@ -1,11 +1,12 @@
 PROG = screen-translate-overlay
 WATCHER = screen-translate-watcher
+VERSION = 1.0.1
 PREFIX = /usr/local
 CC = cc
 WAYLAND_SCANNER = wayland-scanner
 
 PKGS = wayland-client cairo xkbcommon
-CPPFLAGS = $(shell pkg-config --cflags $(PKGS))
+CPPFLAGS = -DVERSION=\"$(VERSION)\" $(shell pkg-config --cflags $(PKGS))
 CFLAGS = -std=c99 -pedantic -Wall -Wextra -Werror -O2
 LDFLAGS = $(shell pkg-config --libs $(PKGS))
 
