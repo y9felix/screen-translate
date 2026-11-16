@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ "${1:-}" = "-v" ] || [ "${1:-}" = "--version" ]; then
-    echo "screen-translate 1.0.1"
+    echo "screen-translate 1.0.2"
     exit 0
 fi
 

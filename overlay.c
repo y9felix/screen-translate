@@ -21,7 +21,7 @@
 #define SHMNAME "screen-translate-shm"
 
 #ifndef VERSION
-#define VERSION "1.0.1"
+#define VERSION "1.0.2"
 #endif
 
 struct buffer {

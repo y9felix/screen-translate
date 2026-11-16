@@ -1,6 +1,6 @@
 PROG = screen-translate-overlay
 WATCHER = screen-translate-watcher
-VERSION = 1.0.1
+VERSION = 1.0.2
 PREFIX = /usr/local
 CC = cc
 WAYLAND_SCANNER = wayland-scanner
