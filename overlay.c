@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
@@ -57,8 +58,10 @@ static cairo_surface_t *trans_surf;
 
 static char *argv0;
 static int show_trans;
+static int failed;
 static volatile sig_atomic_t running = 1;
 static volatile sig_atomic_t reload_requested;
+static volatile sig_atomic_t failed_requested;
 
 static void
 usage(void)
@@ -72,6 +75,8 @@ sig_handler(int sig)
 {
 	if (sig == SIGUSR1)
 		reload_requested = 1;
+	else if (sig == SIGUSR2)
+		failed_requested = 1;
 	else
 		running = 0;
 }
@@ -180,8 +185,10 @@ static void
 render(void)
 {
 	cairo_surface_t *src, *target;
+	cairo_text_extents_t ext;
 	cairo_t *cr;
-	double x;
+	const char *msg;
+	double box_w, x;
 	int h, w;
 
 	if (!win_buf.data || !surface)
@@ -207,16 +214,21 @@ render(void)
 	}
 
 	if (!trans_surf) {
-		x = (win_buf.width - 200) / 2.0;
-		cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.75);
-		cairo_rectangle(cr, x, 24.0, 200.0, 40.0);
-		cairo_fill(cr);
-
+		msg = failed ? "Couldn't translate" : "Translating...";
 		cairo_select_font_face(cr, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
 		cairo_set_font_size(cr, 16.0);
+		cairo_text_extents(cr, msg, &ext);
+
+		box_w = ext.width + 40.0;
+		x = (win_buf.width - box_w) / 2.0;
+
+		cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.75);
+		cairo_rectangle(cr, x, 24.0, box_w, 40.0);
+		cairo_fill(cr);
+
 		cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-		cairo_move_to(cr, x + 45.0, 49.0);
-		cairo_show_text(cr, "Translating...");
+		cairo_move_to(cr, x + 20.0, 49.0);
+		cairo_show_text(cr, msg);
 	}
 
 	cairo_surface_flush(target);
@@ -392,7 +404,7 @@ kb_key(void *data, struct wl_keyboard *kb, uint32_t serial, uint32_t time, uint3
 	if (state != WL_KEYBOARD_KEY_STATE_PRESSED || !xkb_st)
 		return;
 	sym = xkb_state_key_get_one_sym(xkb_st, key + 8);
-	if (sym == XKB_KEY_space || sym == XKB_KEY_Tab) {
+	if (!failed && (sym == XKB_KEY_space || sym == XKB_KEY_Tab)) {
 		show_trans = !show_trans;
 		render();
 		return;
@@ -532,8 +544,10 @@ main(int argc, char *argv[])
 		.global_remove = reg_global_remove,
 	};
 	struct sigaction sa;
+	struct timespec start_ts, now_ts, fail_ts;
 	struct pollfd pfd;
 	const char *orig_path, *trans_path;
+	double el, fel;
 	int ch, ret;
 
 	argv0 = argv[0];
@@ -569,6 +583,7 @@ main(int argc, char *argv[])
 	sa.sa_handler = sig_handler;
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGUSR1, &sa, NULL);
+	sigaction(SIGUSR2, &sa, NULL);
 	sigaction(SIGTERM, &sa, NULL);
 	sigaction(SIGINT, &sa, NULL);
 
@@ -595,6 +610,9 @@ main(int argc, char *argv[])
 	zwlr_layer_surface_v1_add_listener(layer_surface, &layer_listener, NULL);
 
 	wl_surface_commit(surface);
+
+	clock_gettime(CLOCK_MONOTONIC, &start_ts);
+	memset(&fail_ts, 0, sizeof(fail_ts));
 
 	pfd.fd = wl_display_get_fd(display);
 	pfd.events = POLLIN;
@@ -629,6 +647,25 @@ main(int argc, char *argv[])
 			reload_requested = 0;
 			load_trans(trans_path);
 			render();
+		}
+
+		clock_gettime(CLOCK_MONOTONIC, &now_ts);
+
+		if (!trans_surf && !failed) {
+			el = (now_ts.tv_sec - start_ts.tv_sec) + (now_ts.tv_nsec - start_ts.tv_nsec) / 1e9;
+			if (failed_requested || el >= 5.0) {
+				failed = 1;
+				fail_ts = now_ts;
+				render();
+			}
+		}
+
+		if (failed) {
+			fel = (now_ts.tv_sec - fail_ts.tv_sec) + (now_ts.tv_nsec - fail_ts.tv_nsec) / 1e9;
+			if (fel >= 1.2) {
+				unmap_surface();
+				running = 0;
+			}
 		}
 	}
 

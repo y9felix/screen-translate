@@ -72,6 +72,7 @@ else
 fi
 
 chmod 600 "${ORIG_IMG}"
+rm -f "${TRANS_IMG}"
 
 screen-translate-overlay "${ORIG_IMG}" "${TRANS_IMG}" &
 OVERLAY_PID=$!
@@ -80,7 +81,12 @@ echo "${OVERLAY_PID}" > "${OVERLAY_PID_FILE}"
 screen-translate-render "${ORIG_IMG}" "${TRANS_IMG}" >/dev/null 2>&1 &
 RENDER_PID=$!
 
+START_SEC=${SECONDS}
 while kill -0 "${OVERLAY_PID}" 2>/dev/null && kill -0 "${RENDER_PID}" 2>/dev/null; do
+    if [ $((SECONDS - START_SEC)) -ge 5 ]; then
+        kill -9 "${RENDER_PID}" 2>/dev/null || true
+        break
+    fi
     sleep 0.05
 done
 
@@ -91,6 +97,8 @@ else
     if [ -f "${TRANS_IMG}" ] && [ -s "${TRANS_IMG}" ]; then
         chmod 600 "${TRANS_IMG}" 2>/dev/null || true
         kill -SIGUSR1 "${OVERLAY_PID}" 2>/dev/null || true
+    else
+        kill -SIGUSR2 "${OVERLAY_PID}" 2>/dev/null || true
     fi
     wait "${OVERLAY_PID}" 2>/dev/null || true
 fi
