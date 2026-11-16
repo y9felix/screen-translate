@@ -30,15 +30,33 @@ fi
 
 LOCK_FILE="/run/user/${UID}/screen-translate.lock"
 exec 200>"${LOCK_FILE}"
-flock -n 200 || exit 0
+flock 200
+
+RUNNER_PID_FILE="/run/user/${UID}/screen-translate-runner.pid"
+if [ -f "${RUNNER_PID_FILE}" ]; then
+    OLD_PID=$(<"${RUNNER_PID_FILE}")
+    if [ -n "${OLD_PID}" ] && [ "${OLD_PID}" != "$$" ] && kill -0 "${OLD_PID}" 2>/dev/null; then
+        pkill -P "${OLD_PID}" 2>/dev/null || true
+        kill "${OLD_PID}" 2>/dev/null || true
+    fi
+fi
+echo $$ > "${RUNNER_PID_FILE}"
+flock -u 200
 
 ORIG_IMG="/dev/shm/screen-translate-orig-${UID}.png"
 TRANS_IMG="/dev/shm/screen-translate-trans-${UID}.png"
 
 OVERLAY_PID=""
+RENDER_PID=""
 
 cleanup() {
     rm -f "${ORIG_IMG}" "${TRANS_IMG}" "${OVERLAY_PID_FILE}"
+    if [ -f "${RUNNER_PID_FILE}" ] && [ "$(<"${RUNNER_PID_FILE}")" = "$$" ]; then
+        rm -f "${RUNNER_PID_FILE}"
+    fi
+    if [ -n "${RENDER_PID}" ]; then
+        kill "${RENDER_PID}" 2>/dev/null || true
+    fi
     if [ -n "${OVERLAY_PID}" ]; then
         kill "${OVERLAY_PID}" 2>/dev/null || true
     fi
@@ -59,11 +77,20 @@ screen-translate-overlay "${ORIG_IMG}" "${TRANS_IMG}" &
 OVERLAY_PID=$!
 echo "${OVERLAY_PID}" > "${OVERLAY_PID_FILE}"
 
-if screen-translate-render "${ORIG_IMG}" "${TRANS_IMG}" >/dev/null 2>&1; then
+screen-translate-render "${ORIG_IMG}" "${TRANS_IMG}" >/dev/null 2>&1 &
+RENDER_PID=$!
+
+while kill -0 "${OVERLAY_PID}" 2>/dev/null && kill -0 "${RENDER_PID}" 2>/dev/null; do
+    sleep 0.05
+done
+
+if ! kill -0 "${OVERLAY_PID}" 2>/dev/null; then
+    kill "${RENDER_PID}" 2>/dev/null || true
+else
+    wait "${RENDER_PID}" 2>/dev/null || true
     if [ -f "${TRANS_IMG}" ] && [ -s "${TRANS_IMG}" ]; then
         chmod 600 "${TRANS_IMG}" 2>/dev/null || true
         kill -SIGUSR1 "${OVERLAY_PID}" 2>/dev/null || true
     fi
+    wait "${OVERLAY_PID}" 2>/dev/null || true
 fi
-wait "${OVERLAY_PID}" 2>/dev/null || true
-rm -f "${OVERLAY_PID_FILE}"
