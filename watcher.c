@@ -170,7 +170,7 @@ main(int argc, char *argv[])
 				if ((ev.code == KEY_SPACE || ev.code == KEY_TAB) && overlay_active())
 					continue;
 
-				set_timer(tfd, 100);
+				set_timer(tfd, 300);
 			}
 		}
 
